@@ -135,6 +135,7 @@ const PC_TO_NOTE_SHARP = [
 ];
 
 type KeyMode = "major" | "minor";
+type GenerationMode = "automatic" | KeyMode;
 
 type KeyContext = {
   signature: string;
@@ -202,22 +203,70 @@ const ROMAN_NUMERALS: Record<KeyMode, string[]> = {
   minor: ["i", "ii dim", "III", "iv", "V", "VI", "VII"],
 };
 
-const PROGRESSION_TEMPLATES: Record<KeyMode, number[][]> = {
-  major: [
-    [1, 5, 6, 4],
-    [1, 4, 5, 1],
-    [6, 4, 1, 5],
-    [1, 6, 4, 5],
-    [4, 5, 3, 6],
-  ],
-  minor: [
-    [1, 6, 3, 7],
-    [1, 4, 5, 1],
-    [1, 7, 6, 5],
-    [6, 7, 1, 5],
-    [1, 3, 7, 6],
-  ],
+// general for now, may have to edit or add alt fn later if user requests dissonance
+const CHORD_TRANSITIONS: Record<KeyMode, Record<number, number[]>> = {
+  major: {
+    1: [4, 5, 6, 2],
+    2: [5, 4],
+    3: [6, 4],
+    4: [1, 5, 2],
+    5: [1, 6],
+    6: [4, 2, 5],
+    7: [1],
+  },
+  minor: {
+    1: [4, 5, 6, 7],
+    2: [5],
+    3: [6, 7, 4],
+    4: [5, 1],
+    5: [1, 6],
+    6: [7, 3, 4],
+    7: [3, 1],
+  },
 };
+//ranks the transitions, rankings may change as user preference is updated
+//future: plan to add helper fn that changes rankings based on user preference for 
+// commonality vs surprise, and also add some less common transitions to the list
+const TRANSITION_SCORES: Record<KeyMode, Record<string, number>> = {
+  major: {
+    "5-1": 6,
+    "2-5": 5,
+    "4-5": 4,
+    "1-5": 4,
+    "1-6": 3,
+    "6-4": 4,
+    "4-1": 3,
+    "5-6": 2,
+  },
+  minor: {
+    "5-1": 6,
+    "4-5": 5,
+    "7-3": 4,
+    "6-7": 4,
+    "1-6": 3,
+    "1-4": 3,
+    "5-6": 2,
+  },
+};
+
+//default transition scores for any not listed above
+// note: scores are based on gen music theory but late can be adjusted for culture/genre
+function getTransitionScore(mode: KeyMode, from: number, to: number) {
+  return TRANSITION_SCORES[mode][`${from}-${to}`] ?? 1;
+}
+
+// ******WEIGHTS for scoring chord patterns*********//
+const MELODY_WEIGHT = 1.3;
+const TRANSITION_WEIGHT = 1.0;
+const CADENCE_WEIGHT = 1.0;
+const OPENING_TONIC_BONUS = 2;
+
+function getMetricWeight(slot: number) {
+  if (slot === 0) return 2;
+  if (slot === 4) return 1.5;
+  if (slot === 2 || slot === 6) return 1.2;
+  return 1;
+}
 function getKeySignatureExtraWidth(keySignature: string) {
   const accidentalCounts: Record<string, number> = {
     C: 0,
@@ -234,6 +283,8 @@ function getKeySignatureExtraWidth(keySignature: string) {
 
   return (accidentalCounts[keySignature] ?? 0) * 12;
 }
+
+
 type ChordCandidate = {
   degree: number;
   name: string;
@@ -241,6 +292,9 @@ type ChordCandidate = {
   pcs: number[];
   pitches: string[];
 };
+
+const DEFAULT_CHORD_ROOT_OCTAVE = 3;
+const MIN_CHORD_MELODY_GAP_SEMITONES = 5;
 
 function mod12(n: number) {
   return ((n % 12) + 12) % 12;
@@ -258,11 +312,6 @@ function pitchToPc(pitch: string) {
   // "bb/4" -> bb
   const [name] = pitch.split("/");
   return NOTE_TO_PC[name.toLowerCase()];
-}
-
-function pcToPitch(pc: number, octave: number) {
-  const noteName = PC_TO_NOTE_SHARP[mod12(pc)];
-  return `${noteName}/${octave}`;
 }
 
 function parsePitchToMidi(pitch: string) {
@@ -298,7 +347,7 @@ function getCloseChordVoicingPitches(
   fifthPc: number,
   lowestMelodyMidi?: number
 ) {
-  let rootMidi = rootPc + 12 * 2;
+  let rootMidi = rootPc + 12 * DEFAULT_CHORD_ROOT_OCTAVE;
   let thirdMidi = getNearestPitchAbove(rootMidi, thirdPc);
   let fifthMidi = getNearestPitchAbove(rootMidi, fifthPc);
 
@@ -306,7 +355,7 @@ function getCloseChordVoicingPitches(
 
   while (
     lowestMelodyMidi !== undefined &&
-    highestChordMidi >= lowestMelodyMidi &&
+    highestChordMidi > lowestMelodyMidi - MIN_CHORD_MELODY_GAP_SEMITONES &&
     rootMidi >= 12
   ) {
     rootMidi -= 12;
@@ -358,6 +407,72 @@ function getTriadPcs(rootPc: number, quality: "major" | "minor" | "dim") {
   return [rootPc, mod12(rootPc + 3), mod12(rootPc + 6)];
 }
 
+function buildChordPaths(
+  mode: KeyMode,
+  currentPath: number[],
+  targetLength: number
+): number[][] {
+  if (currentPath.length === targetLength) {
+    return [currentPath];
+  }
+
+  const currentDegree = currentPath[currentPath.length - 1];
+  const nextDegrees = CHORD_TRANSITIONS[mode][currentDegree] ?? [];
+
+  return nextDegrees.flatMap((nextDegree) =>
+    buildChordPaths(mode, [...currentPath, nextDegree], targetLength)
+  );
+}
+
+function scoreChordPath(
+  path: number[],
+  chords: ChordCandidate[],
+  key: KeyContext,
+  measures: PlacedNote[][],
+  getRenderedPitchFn: (note: PlacedNote) => string
+) {
+  let melodyScore = 0;
+  let transitionScore = 0;
+  let cadenceScore = 0;
+  let openingScore = 0;
+
+  path.forEach((degree, measureIndex) => {
+    const chord = chords[degree - 1];
+    const measureNotes = measures[measureIndex] ?? [];
+
+    melodyScore += scoreChordForMeasure(
+      chord,
+      measureNotes,
+      getRenderedPitchFn
+    );
+  });
+
+  for (let i = 0; i < path.length - 1; i++) {
+    transitionScore += getTransitionScore(
+      key.mode,
+      path[i],
+      path[i + 1]
+    );
+  }
+
+  const lastDegree = path[path.length - 1];
+  const firstDegree = path[0];
+
+  if (firstDegree === 1) openingScore += OPENING_TONIC_BONUS;
+
+  if (lastDegree === 1) cadenceScore += 8;
+  else if (lastDegree === 5) cadenceScore += 3;
+  else if (lastDegree === 2) cadenceScore -= 3;
+  else if (lastDegree === 3) cadenceScore -= 3;
+  else if (lastDegree === 7) cadenceScore -= 5;
+
+  return (
+    melodyScore * MELODY_WEIGHT +
+    transitionScore * TRANSITION_WEIGHT +
+    cadenceScore * CADENCE_WEIGHT +
+    openingScore
+  );
+}
 function getKeyContexts(keySignature: string): KeyContext[] {
   const signatureKeys = KEY_SIGNATURE_CONTEXTS[keySignature] ?? {
     major: "c",
@@ -471,6 +586,23 @@ function inferKeyFromMelody(
   return bestKey;
 }
 
+function getGenerationKey(
+  keySignature: string,
+  generationMode: GenerationMode,
+  measures: PlacedNote[][],
+  getRenderedPitchFn: (note: PlacedNote) => string
+) {
+  if (generationMode === "automatic") {
+    return inferKeyFromMelody(keySignature, measures, getRenderedPitchFn);
+  }
+
+  const keyContexts = getKeyContexts(keySignature);
+  return (
+    keyContexts.find((keyContext) => keyContext.mode === generationMode) ??
+    keyContexts[0]
+  );
+}
+
 function scoreChordForMeasure(
   chord: ChordCandidate,
   measureNotes: PlacedNote[],
@@ -481,65 +613,83 @@ function scoreChordForMeasure(
   for (const note of measureNotes) {
     if (note.kind === "rest") continue;
 
-    const renderedPitch = getRenderedPitchFn(note);
-    const melodyPc = pitchToPc(renderedPitch);
+    const melodyPc = pitchToPc(getRenderedPitchFn(note));
     if (melodyPc === undefined) continue;
 
-    if (chord.pcs.includes(melodyPc)) {
-      score += note.durationSlots;
-    } else {
-      const hasNearbyChordTone = chord.pcs.some((pc) => {
-        const distance = pitchDistanceSemitones(pc, melodyPc);
-        return distance > 0 && distance <= 3;
-      });
+    const noteWeight =
+      note.durationSlots * getMetricWeight(note.slot);
 
-      if (hasNearbyChordTone) {
-        score -= note.durationSlots * 2;
-      } else {
-        score -= 1;
-      }
+    if (chord.pcs.includes(melodyPc)) {
+      score += noteWeight * 2;
+      continue;
+    }
+
+    const hasHalfStepClash = chord.pcs.some((pc) => {
+      const distance = pitchDistanceSemitones(pc, melodyPc);
+      return distance === 1;
+    });
+
+    if (hasHalfStepClash) {
+      score -= noteWeight * 3;
+    } else {
+      score -= noteWeight;
     }
   }
 
   return score;
 }
 
+function countPathDifferences(pathA: number[], pathB: number[]) {
+  const maxLength = Math.max(pathA.length, pathB.length);
+  let differences = 0;
+
+  for (let i = 0; i < maxLength; i++) {
+    if (pathA[i] !== pathB[i]) {
+      differences += 1;
+    }
+  }
+
+  return differences;
+}
+
 function chooseProgression(
   key: KeyContext,
   measures: PlacedNote[][],
-  getRenderedPitchFn: (note: PlacedNote) => string
+  getRenderedPitchFn: (note: PlacedNote) => string,
+  previousPath?: number[]
 ) {
   const chords = buildKeyChords(key);
-  const templates = PROGRESSION_TEMPLATES[key.mode];
   const hasMelody = measures.some((measureNotes) =>
     measureNotes.some((note) => note.kind === "note")
   );
+  const startDegrees = key.mode === "major" ? [1, 6, 4] : [1, 6, 3];
+  const paths = startDegrees.flatMap((degree) =>
+    buildChordPaths(key.mode, [degree], 4)
+  );
 
-  const rankedTemplates = templates
-    .map((template) => {
-      const score = template.reduce((total, degree, measureIndex) => {
-        const chord = chords[degree - 1];
-        const measureNotes = measures[measureIndex] ?? [];
-        return (
-          total + scoreChordForMeasure(chord, measureNotes, getRenderedPitchFn)
-        );
-      }, 0);
-
-      const cadenceBonus = template[3] === 1 || template[3] === 5 ? 2 : 0;
-
+  const rankedPaths = paths
+    .map((path) => {
       return {
-        template,
-        score: hasMelody ? score + cadenceBonus : Math.random(),
+        path,
+        score: hasMelody
+          ? scoreChordPath(path, chords, key, measures, getRenderedPitchFn)
+          : Math.random(),
       };
     })
     .sort((a, b) => b.score - a.score);
 
-  const topChoices = rankedTemplates.slice(0, hasMelody ? 3 : templates.length);
+  const topChoices = rankedPaths.slice(0, hasMelody ? 12 : rankedPaths.length);
+  const variedChoices = previousPath
+    ? topChoices.filter(
+        ({ path }) => countPathDifferences(path, previousPath) >= 2
+      )
+    : topChoices;
+  const choices = variedChoices.length > 0 ? variedChoices : topChoices;
   const chosen =
-    topChoices[Math.floor(Math.random() * topChoices.length)] ??
-    rankedTemplates[0];
+    choices[Math.floor(Math.random() * choices.length)] ??
+    rankedPaths[0];
 
-  return chosen.template.map((degree) => chords[degree - 1]);
+  return chosen.path.map((degree) => chords[degree - 1]);
 }
 
 export default function Staff() {
@@ -547,6 +697,8 @@ export default function Staff() {
   const staffWrapperRef = useRef<HTMLDivElement>(null);
 
   const [keySignature, setKeySignature] = useState("C");
+  const [generationMode, setGenerationMode] =
+    useState<GenerationMode>("automatic");
   const [selectedAccidental, setSelectedAccidental] =
   useState<"#" | "b" | "n" | null>(null);
 
@@ -576,6 +728,7 @@ export default function Staff() {
   const [progressionInfo, setProgressionInfo] = useState(
     "Chord staff is empty. Generate chords to fill it."
   );
+  const [lastGeneratedPath, setLastGeneratedPath] = useState<number[]>();
   const staffX = 20;
   const melodyStaffY = 40;
   const chordStaffY = 190;
@@ -956,15 +1109,17 @@ export default function Staff() {
   }
 
   function generateChords() {
-    const inferredKey = inferKeyFromMelody(
+    const generatedKey = getGenerationKey(
       keySignature,
+      generationMode,
       measures,
       getRenderedPitch
     );
     const progression = chooseProgression(
-      inferredKey,
+      generatedKey,
       measures,
-      getRenderedPitch
+      getRenderedPitch,
+      lastGeneratedPath
     );
 
     const newChordMeasures: PlacedChord[][] = progression.map(
@@ -992,8 +1147,9 @@ export default function Staff() {
     );
 
     setChordMeasures(newChordMeasures);
+    setLastGeneratedPath(progression.map((chord) => chord.degree));
     setProgressionInfo(
-      `Generated in ${inferredKey.label}: ${progression
+      `Generated in ${generatedKey.label}: ${progression
         .map((chord) => chord.name)
         .join(" - ")}`
     );
@@ -1120,6 +1276,16 @@ function handleAccidentalClick(accidental: "#" | "b" | "n") {
     prev === accidental ? null : accidental
   );
 }
+  function handleKeySignatureChange(nextKeySignature: string) {
+    setKeySignature(nextKeySignature);
+    setLastGeneratedPath(undefined);
+  }
+
+  function handleGenerationModeChange(nextGenerationMode: GenerationMode) {
+    setGenerationMode(nextGenerationMode);
+    setLastGeneratedPath(undefined);
+  }
+
   function deleteLastNote() {
     setMeasures((prevMeasures) => {
       const newMeasures = prevMeasures.map((measure) => [...measure]);
@@ -1141,6 +1307,7 @@ function handleAccidentalClick(accidental: "#" | "b" | "n") {
 
   function clearChords() {
     setChordMeasures([[], [], [], []]);
+    setLastGeneratedPath(undefined);
     setProgressionInfo("Chord progression cleared.");
   }
 
@@ -1241,7 +1408,7 @@ return (
           <div className="text-xs text-gray-500 mb-1">Key signature</div>
           <select
             value={keySignature}
-            onChange={(e) => setKeySignature(e.target.value)}
+            onChange={(e) => handleKeySignatureChange(e.target.value)}
             className="bg-gray-200 text-black border border-gray-500 rounded px-3 h-10"
           >
             <option value="C">C</option>
@@ -1304,22 +1471,35 @@ return (
           </button>
         </div>
         <div>
-          <div className="text-xs invisible mb-1">x</div>
+          <div className="text-xs text-gray-500 mb-1">Mode</div>
+          <select
+            value={generationMode}
+            onChange={(e) =>
+              handleGenerationModeChange(e.target.value as GenerationMode)
+            }
+            className="bg-gray-200 text-black border border-gray-500 rounded px-3 h-10"
+          >
+            <option value="automatic">Automatic</option>
+            <option value="major">Major</option>
+            <option value="minor">Minor</option>
+          </select>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <div>
+            <div className="text-xs invisible mb-1">x</div>
+            <button
+              onClick={playMeasures}
+              className="bg-green-700 text-white border border-green-900 rounded px-4 h-10 hover:bg-green-600"
+            >
+              Play
+            </button>
+          </div>
           <button
             onClick={clearChords}
             disabled={chordMeasures.every((measure) => measure.length === 0)}
             className={clearChordsButtonClass()}
           >
             Clear Chords
-          </button>
-        </div>
-        <div>
-          <div className="text-xs invisible mb-1">x</div>
-          <button
-            onClick={playMeasures}
-            className="bg-green-700 text-white border border-green-900 rounded px-4 h-10 hover:bg-green-600"
-          >
-            Play
           </button>
         </div>
       </div>
