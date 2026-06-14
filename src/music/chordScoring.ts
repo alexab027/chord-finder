@@ -25,6 +25,10 @@ function getPcLabel(pc: number) {
   return NOTE_LABELS[noteName] ?? noteName.toUpperCase();
 }
 
+function getNoteNameLabel(noteName: string) {
+  return NOTE_LABELS[noteName.toLowerCase()] ?? noteName.toUpperCase();
+}
+
 function getMeasureMelodyPcs(
   measureNotes: PlacedNote[],
   getRenderedPitchFn: (note: PlacedNote) => string
@@ -168,6 +172,12 @@ export function scoreStyle(
   if (style === "descendingBass" && context.previousChord) {
     const downwardDistance = mod12(context.previousChord.bassPc - candidate.bassPc);
     const upwardDistance = mod12(candidate.bassPc - context.previousChord.bassPc);
+
+    if (candidate.inversion && candidate.bassName) {
+      reasons.push(
+        `Uses an inversion to put ${getNoteNameLabel(candidate.bassName)} in the bass`
+      );
+    }
 
     if (downwardDistance > 0 && downwardDistance < upwardDistance) {
       points += 5;

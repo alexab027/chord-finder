@@ -5,8 +5,10 @@ import type {
   SuspendedChordQuality,
 } from "./types";
 import {
+  getCloseChordVoicingForPcs,
   getCloseChordVoicingPitches,
   mod12,
+  NOTE_LABELS,
   NOTE_LETTERS,
   SCALE_OFFSETS,
   spellPitchClassForLetter,
@@ -30,6 +32,52 @@ const SUSPENDED_CHORD_QUALITIES: SuspendedChordQuality[] = [
   "sus2",
   "sus4",
 ];
+
+const BLUES_DOMINANT_DEGREES = [1, 4, 5];
+
+function formatBassName(noteName: string) {
+  return NOTE_LABELS[noteName.toLowerCase()] ?? noteName.toUpperCase();
+}
+
+function buildInversionCandidates(
+  candidate: ChordCandidate,
+  maxBassIndex = candidate.pcs.length - 1
+) {
+  const candidates = [
+    {
+      ...candidate,
+      bassName: candidate.noteNames[0],
+      inversion: 0,
+    },
+  ];
+
+  for (let bassIndex = 1; bassIndex <= maxBassIndex; bassIndex++) {
+    const pcs = [
+      candidate.pcs[bassIndex],
+      ...candidate.pcs.slice(0, bassIndex),
+      ...candidate.pcs.slice(bassIndex + 1),
+    ];
+    const noteNames = [
+      candidate.noteNames[bassIndex],
+      ...candidate.noteNames.slice(0, bassIndex),
+      ...candidate.noteNames.slice(bassIndex + 1),
+    ];
+    const bassName = noteNames[0];
+
+    candidates.push({
+      ...candidate,
+      name: `${candidate.name}/${formatBassName(bassName)}`,
+      bassPc: pcs[0],
+      bassName,
+      inversion: bassIndex,
+      pcs,
+      noteNames,
+      pitches: getCloseChordVoicingForPcs(pcs, noteNames),
+    });
+  }
+
+  return candidates;
+}
 
 function buildScaleSpellings(key: KeyContext) {
   const tonicLetterIndex = NOTE_LETTERS.indexOf(key.tonicName[0].toLowerCase());
@@ -76,6 +124,21 @@ function buildMajorKeyChords(key: KeyContext): ChordCandidate[] {
 
     return [
       triad,
+      buildAdd9ChordCandidate(
+        degreeIndex + 1,
+        romanNumerals[degreeIndex],
+        pcs,
+        degree.name
+      ),
+      ...buildSeventhChordCandidates(
+        degreeIndex + 1,
+        romanNumerals[degreeIndex],
+        degree.pc,
+        degree.name,
+        pcs,
+        TRIAD_QUALITIES[key.mode][degreeIndex],
+        key.mode
+      ),
       ...SUSPENDED_CHORD_QUALITIES.map((quality) =>
         buildSuspendedChordCandidate(
           degreeIndex + 1,
@@ -86,7 +149,12 @@ function buildMajorKeyChords(key: KeyContext): ChordCandidate[] {
           quality
         )
       ),
-    ];
+    ].flatMap((candidate) =>
+      buildInversionCandidates(
+        candidate,
+        candidate.quality === "add9" ? 2 : candidate.pcs.length - 1
+      )
+    );
   });
 }
 
@@ -104,10 +172,10 @@ function getTriadPcs(rootPc: number, quality: "major" | "minor" | "dim") {
 
 function getSuspendedChordPcs(rootPc: number, quality: SuspendedChordQuality) {
   if (quality === "sus2") {
-    return [rootPc, mod12(rootPc + 2), mod12(rootPc + 7)];
+    return [rootPc, mod12(rootPc + 7), mod12(rootPc + 2)];
   }
 
-  return [rootPc, mod12(rootPc + 5), mod12(rootPc + 7)];
+  return [rootPc, mod12(rootPc + 7), mod12(rootPc + 5)];
 }
 
 function buildSuspendedChordCandidate(
@@ -125,8 +193,8 @@ function buildSuspendedChordCandidate(
     NOTE_LETTERS[(rootLetterIndex + suspendedLetterOffset) % NOTE_LETTERS.length];
   const noteNames = [
     spellPitchClassForLetter(pcs[0], rootName[0]),
-    spellPitchClassForLetter(pcs[1], suspendedLetter),
-    spellPitchClassForLetter(pcs[2], fifthName[0]),
+    spellPitchClassForLetter(pcs[1], fifthName[0]),
+    spellPitchClassForLetter(pcs[2], suspendedLetter),
   ];
 
   return {
@@ -140,6 +208,131 @@ function buildSuspendedChordCandidate(
     quality,
     keyFit: "diatonic",
   };
+}
+
+function getScaleLetter(rootName: string, letterOffset: number) {
+  const rootLetterIndex = NOTE_LETTERS.indexOf(rootName[0].toLowerCase());
+  return NOTE_LETTERS[(rootLetterIndex + letterOffset) % NOTE_LETTERS.length];
+}
+
+function buildAdd9ChordCandidate(
+  degree: number,
+  romanNumeral: string,
+  triadPcs: number[],
+  rootName: string
+): ChordCandidate {
+  const ninthPc = mod12(triadPcs[0] + 14);
+  const ninthLetter = getScaleLetter(rootName, 1);
+  const pcs = [...triadPcs, ninthPc];
+  const noteNames = [
+    spellPitchClassForLetter(pcs[0], rootName[0]),
+    spellPitchClassForLetter(pcs[1], getScaleLetter(rootName, 2)),
+    spellPitchClassForLetter(pcs[2], getScaleLetter(rootName, 4)),
+    spellPitchClassForLetter(pcs[3], ninthLetter),
+  ];
+
+  return {
+    degree,
+    name: `${romanNumeral}add9`,
+    rootPc: pcs[0],
+    bassPc: pcs[0],
+    pcs,
+    noteNames,
+    pitches: getCloseChordVoicingForPcs(pcs, noteNames),
+    quality: "add9",
+    keyFit: "diatonic",
+  };
+}
+
+function getDiatonicSeventhQuality(
+  triadQuality: "major" | "minor" | "dim",
+  degree: number,
+  mode: KeyMode
+) {
+  if (mode === "major" && degree === 5) return "dom7";
+  if (mode === "minor" && (degree === 5 || degree === 7)) return "dom7";
+  if (triadQuality === "major") return "maj7";
+  if (triadQuality === "minor") return "min7";
+  return undefined;
+}
+
+function buildSeventhChordCandidate(
+  degree: number,
+  romanNumeral: string,
+  rootPc: number,
+  rootName: string,
+  triadPcs: number[],
+  quality: "maj7" | "min7" | "dom7",
+  keyFit: "diatonic" | "borrowed"
+): ChordCandidate {
+  const seventhPc = mod12(rootPc + (quality === "maj7" ? 11 : 10));
+  const seventhLetter = getScaleLetter(rootName, 6);
+  const pcs = [...triadPcs, seventhPc];
+  const noteNames = [
+    spellPitchClassForLetter(pcs[0], rootName[0]),
+    spellPitchClassForLetter(pcs[1], getScaleLetter(rootName, 2)),
+    spellPitchClassForLetter(pcs[2], getScaleLetter(rootName, 4)),
+    spellPitchClassForLetter(pcs[3], seventhLetter),
+  ];
+
+  return {
+    degree,
+    name: `${romanNumeral}${quality}`,
+    rootPc,
+    bassPc: rootPc,
+    pcs,
+    noteNames,
+    pitches: getCloseChordVoicingForPcs(pcs, noteNames),
+    quality,
+    keyFit,
+  };
+}
+
+function buildSeventhChordCandidates(
+  degree: number,
+  romanNumeral: string,
+  rootPc: number,
+  rootName: string,
+  triadPcs: number[],
+  triadQuality: "major" | "minor" | "dim",
+  mode: KeyMode
+) {
+  const diatonicQuality = getDiatonicSeventhQuality(triadQuality, degree, mode);
+  const candidates: ChordCandidate[] = [];
+
+  if (diatonicQuality) {
+    candidates.push(
+      buildSeventhChordCandidate(
+        degree,
+        romanNumeral,
+        rootPc,
+        rootName,
+        triadPcs,
+        diatonicQuality,
+        "diatonic"
+      )
+    );
+  }
+
+  if (
+    triadQuality !== "dim" &&
+    BLUES_DOMINANT_DEGREES.includes(degree) &&
+    diatonicQuality !== "dom7"
+  ) {
+    candidates.push(
+      buildSeventhChordCandidate(
+        degree,
+        romanNumeral,
+        rootPc,
+        rootName,
+        triadPcs,
+        "dom7",
+        "borrowed"
+      )
+    );
+  }
+
+  return candidates;
 }
 
 export function buildKeyChords(key: KeyContext): ChordCandidate[] {
@@ -177,6 +370,21 @@ export function buildKeyChords(key: KeyContext): ChordCandidate[] {
 
     return [
       triad,
+      buildAdd9ChordCandidate(
+        degreeIndex + 1,
+        ROMAN_NUMERALS[key.mode][degreeIndex],
+        pcs,
+        degree.name
+      ),
+      ...buildSeventhChordCandidates(
+        degreeIndex + 1,
+        ROMAN_NUMERALS[key.mode][degreeIndex],
+        degree.pc,
+        degree.name,
+        pcs,
+        quality,
+        key.mode
+      ),
       ...SUSPENDED_CHORD_QUALITIES.map((susQuality) =>
         buildSuspendedChordCandidate(
           degreeIndex + 1,
@@ -187,6 +395,11 @@ export function buildKeyChords(key: KeyContext): ChordCandidate[] {
           susQuality
         )
       ),
-    ];
+    ].flatMap((candidate) =>
+      buildInversionCandidates(
+        candidate,
+        candidate.quality === "add9" ? 2 : candidate.pcs.length - 1
+      )
+    );
   });
 }

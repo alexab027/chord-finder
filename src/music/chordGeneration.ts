@@ -67,6 +67,10 @@ const MELODY_WEIGHT = 1.3;
 const TRANSITION_WEIGHT = 1.0;
 const CADENCE_WEIGHT = 1.0;
 const OPENING_TONIC_BONUS = 2;
+const DEFAULT_BASS_OCTAVE = 3;
+const NARROW_DESCENDING_BASS_WEIGHT = 2;
+const TOP_PATH_COUNT = 8;
+const TOP_SCORE_WINDOW = 8;
 
 function buildChordPaths(
   mode: KeyMode,
@@ -89,6 +93,23 @@ function getChordCandidatesForDegree(chords: ChordCandidate[], degree: number) {
   return chords.filter((chord) => chord.degree === degree);
 }
 
+function getPlannedBassMidi(
+  candidate: ChordCandidate,
+  previousBassMidi?: number
+) {
+  let bassMidi = candidate.bassPc + 12 * DEFAULT_BASS_OCTAVE;
+
+  while (
+    previousBassMidi !== undefined &&
+    bassMidi >= previousBassMidi &&
+    bassMidi >= 12
+  ) {
+    bassMidi -= 12;
+  }
+
+  return bassMidi;
+}
+
 function getBestScoredChordForMeasure(
   degree: number,
   chords: ChordCandidate[],
@@ -98,13 +119,50 @@ function getBestScoredChordForMeasure(
     measureNotes: PlacedNote[];
     getRenderedPitchFn: (note: PlacedNote) => string;
     previousChord?: ChordCandidate;
+    previousBassMidi?: number;
   }
 ) {
   const candidates = getChordCandidatesForDegree(chords, degree);
+  const bassFilteredCandidates =
+    context.style === "descendingBass" && context.previousBassMidi !== undefined
+      ? candidates.filter((candidate) =>
+          getPlannedBassMidi(candidate, context.previousBassMidi) <
+          (context.previousBassMidi as number)
+        )
+      : candidates;
+  const availableCandidates =
+    bassFilteredCandidates.length > 0 ? bassFilteredCandidates : candidates;
 
   return (
-    candidates
-      .map((candidate) => scoreChord(candidate, context))
+    availableCandidates
+      .map((candidate) => {
+        const scoredChord = scoreChord(candidate, context);
+
+        if (
+          context.style !== "descendingBass" ||
+          context.previousBassMidi === undefined
+        ) {
+          return scoredChord;
+        }
+
+        const bassMidi = getPlannedBassMidi(candidate, context.previousBassMidi);
+        const bassDrop = context.previousBassMidi - bassMidi;
+
+        return {
+          ...scoredChord,
+          bassMidi,
+          score:
+            scoredChord.score -
+            bassDrop * NARROW_DESCENDING_BASS_WEIGHT +
+            (bassDrop <= 2 ? 6 : bassDrop <= 5 ? 3 : 0),
+          reasons: [
+            ...scoredChord.reasons,
+            bassDrop <= 5
+              ? "Keeps the descending bass line narrow"
+              : "Keeps the bass descending, but with a wider drop",
+          ],
+        };
+      })
       .sort((a, b) => b.score - a.score)[0] ??
     scoreChord(chords[0], context)
   );
@@ -124,6 +182,7 @@ function scoreChordPath(
   let cadenceScore = 0;
   let openingScore = 0;
   let previousChord: ChordCandidate | undefined;
+  let previousBassMidi: number | undefined;
 
   path.forEach((degree, measureIndex) => {
     const measureNotes = measures[measureIndex] ?? [];
@@ -133,10 +192,17 @@ function scoreChordPath(
       measureNotes,
       getRenderedPitchFn,
       previousChord,
+      previousBassMidi,
     });
+    const bassMidi =
+      style === "descendingBass"
+        ? scoredChord.bassMidi ?? getPlannedBassMidi(scoredChord.chord)
+        : undefined;
+
     scoredChords.push(scoredChord);
     candidateScore += scoredChord.score;
     previousChord = scoredChord.chord;
+    previousBassMidi = bassMidi;
   });
 
   for (let i = 0; i < path.length - 1; i++) {
@@ -183,5 +249,12 @@ export function chooseProgression(
     )
     .sort((a, b) => b.score - a.score);
 
-  return rankedPaths[0]?.scoredChords ?? [];
+  const bestScore = rankedPaths[0]?.score ?? 0;
+  const topChoices = rankedPaths
+    .filter((choice) => choice.score >= bestScore - TOP_SCORE_WINDOW)
+    .slice(0, TOP_PATH_COUNT);
+  const choices = topChoices.length > 0 ? topChoices : rankedPaths;
+  const chosen = choices[Math.floor(Math.random() * choices.length)];
+
+  return chosen?.scoredChords ?? [];
 }

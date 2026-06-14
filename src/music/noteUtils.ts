@@ -285,7 +285,7 @@ export function spellPitchClassForLetter(pc: number, letter: string) {
   return accidental === undefined ? PC_TO_NOTE_SHARP[pc] : `${letter}${accidental}`;
 }
 
-function getNearestPitchAbove(referenceMidi: number, pc: number) {
+function getNearestPitchAtLeast(referenceMidi: number, pc: number) {
   let candidate = Math.floor(referenceMidi / 12) * 12 + mod12(pc);
   while (candidate < referenceMidi) {
     candidate += 12;
@@ -293,18 +293,33 @@ function getNearestPitchAbove(referenceMidi: number, pc: number) {
   return candidate;
 }
 
-export function getCloseChordVoicingPitches(
-  rootPc: number,
-  thirdPc: number,
-  fifthPc: number,
+export function getCloseChordVoicingForPcs(
+  pcs: number[],
   noteNames?: string[],
-  lowestMelodyMidi?: number
+  lowestMelodyMidi?: number,
+  previousBassMidi?: number
 ) {
-  let rootMidi = rootPc + 12 * DEFAULT_CHORD_ROOT_OCTAVE;
-  let thirdMidi = getNearestPitchAbove(rootMidi, thirdPc);
-  let fifthMidi = getNearestPitchAbove(rootMidi, fifthPc);
+  const minVoiceGapSemitones = 3;
+  let rootMidi = pcs[0] + 12 * DEFAULT_CHORD_ROOT_OCTAVE;
 
-  let highestChordMidi = Math.max(rootMidi, thirdMidi, fifthMidi);
+  while (
+    previousBassMidi !== undefined &&
+    rootMidi >= previousBassMidi &&
+    rootMidi >= 12
+  ) {
+    rootMidi -= 12;
+  }
+
+  let chordMidis = pcs.reduce<number[]>((midis, pc, index) => {
+    if (index === 0) return [rootMidi];
+
+    const previousMidi = midis[midis.length - 1];
+    return [
+      ...midis,
+      getNearestPitchAtLeast(previousMidi + minVoiceGapSemitones, pc),
+    ];
+  }, []);
+  let highestChordMidi = Math.max(...chordMidis);
 
   while (
     lowestMelodyMidi !== undefined &&
@@ -312,22 +327,37 @@ export function getCloseChordVoicingPitches(
     rootMidi >= 12
   ) {
     rootMidi -= 12;
-    thirdMidi = getNearestPitchAbove(rootMidi, thirdPc);
-    fifthMidi = getNearestPitchAbove(rootMidi, fifthPc);
-    highestChordMidi = Math.max(rootMidi, thirdMidi, fifthMidi);
+    chordMidis = pcs.reduce<number[]>((midis, pc, index) => {
+      if (index === 0) return [rootMidi];
+
+      const previousMidi = midis[midis.length - 1];
+      return [
+        ...midis,
+        getNearestPitchAtLeast(previousMidi + minVoiceGapSemitones, pc),
+      ];
+    }, []);
+    highestChordMidi = Math.max(...chordMidis);
   }
 
-  return [
-    noteNames
-      ? midiToSpelledPitch(rootMidi, noteNames[0])
-      : midiToPitch(rootMidi),
-    noteNames
-      ? midiToSpelledPitch(thirdMidi, noteNames[1])
-      : midiToPitch(thirdMidi),
-    noteNames
-      ? midiToSpelledPitch(fifthMidi, noteNames[2])
-      : midiToPitch(fifthMidi),
-  ];
+  return chordMidis.map((midi, index) =>
+    noteNames ? midiToSpelledPitch(midi, noteNames[index]) : midiToPitch(midi)
+  );
+}
+
+export function getCloseChordVoicingPitches(
+  rootPc: number,
+  thirdPc: number,
+  fifthPc: number,
+  noteNames?: string[],
+  lowestMelodyMidi?: number,
+  previousBassMidi?: number
+) {
+  return getCloseChordVoicingForPcs(
+    [rootPc, thirdPc, fifthPc],
+    noteNames,
+    lowestMelodyMidi,
+    previousBassMidi
+  );
 }
 
 export function getMeasureLowestMelodyMidi(

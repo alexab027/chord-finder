@@ -46,6 +46,8 @@ export type ChordCandidate = {
   name: string;
   rootPc: number;
   bassPc: number;
+  bassName?: string;
+  inversion?: number;
   pcs: number[];
   noteNames: string[];
   pitches: string[];
@@ -62,6 +64,7 @@ export type ScoredChord = {
   chord: ChordCandidate;
   score: number;
   reasons: string[];
+  bassMidi?: number;
 };
 
 export type ChordScoreContext = {

@@ -17,10 +17,11 @@ import { chooseProgression } from "../music/chordGeneration";
 import { getGenerationKey } from "../music/keyDetection";
 import {
   DURATION_TO_SLOTS,
-  getCloseChordVoicingPitches,
+  getCloseChordVoicingForPcs,
   getKeySignatureExtraWidth,
   getMeasureLowestMelodyMidi,
   KEY_SIGNATURE_ACCIDENTALS,
+  parsePitchToMidi,
   PITCHES_TOP_TO_BOTTOM,
 } from "../music/noteUtils";
 import type {
@@ -483,6 +484,7 @@ export default function Staff() {
       chordStyle
     );
 
+    let previousBassMidi: number | undefined;
     const newChordMeasures: PlacedChord[][] = progression.map(
       (scoredChord, measureIndex) => {
         const chord = scoredChord.chord;
@@ -490,19 +492,21 @@ export default function Staff() {
           measures[measureIndex],
           getRenderedPitch
         );
+        const pitches = getCloseChordVoicingForPcs(
+          chord.pcs,
+          chord.noteNames,
+          lowestMelodyMidi,
+          chordStyle === "descendingBass" ? previousBassMidi : undefined
+        );
+
+        previousBassMidi = parsePitchToMidi(pitches[0]) ?? previousBassMidi;
 
         return [
           {
             slot: 0,
             duration: "w",
             durationSlots: 8,
-            pitches: getCloseChordVoicingPitches(
-              chord.pcs[0],
-              chord.pcs[1],
-              chord.pcs[2],
-              chord.noteNames,
-              lowestMelodyMidi
-            ),
+            pitches,
             symbol: chord.name,
             score: scoredChord.score,
             reasons: scoredChord.reasons,
@@ -597,6 +601,21 @@ function handleAccidentalClick(accidental: "#" | "b" | "n") {
       ? "border border-gray-300 rounded px-3 h-10 text-sm text-gray-400"
       : "border border-gray-300 rounded px-3 h-10 text-sm text-gray-400 cursor-not-allowed";
   }
+
+  const chordExplanations = chordMeasures.flatMap((measureChords, measureIndex) =>
+    measureChords.flatMap((chord) => {
+      if (!chord.reasons || chord.reasons.length === 0) return [];
+
+      return [
+        {
+          measureNumber: measureIndex + 1,
+          symbol: chord.symbol,
+          score: chord.score,
+          reasons: chord.reasons,
+        },
+      ];
+    })
+  );
 
 return (
   <div className="bg-white border rounded-lg p-4 shadow space-y-4">
@@ -778,6 +797,39 @@ return (
     </div>
 
 <p className="text-sm text-gray-700">{progressionInfo}</p>
+
+    {chordExplanations.length > 0 && (
+      <div
+        className="border border-gray-300 bg-gray-50 rounded p-3 text-sm text-gray-800 space-y-3"
+        style={{ width: rendererWidth }}
+      >
+        <div className="font-semibold text-gray-900">Why these chords?</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {chordExplanations.map((explanation) => (
+            <div
+              key={`${explanation.measureNumber}-${explanation.symbol}`}
+              className="bg-white border border-gray-200 rounded p-3"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="font-semibold">
+                  Measure {explanation.measureNumber}: {explanation.symbol}
+                </div>
+                {explanation.score !== undefined && (
+                  <div className="text-xs text-gray-500">
+                    Score {explanation.score}
+                  </div>
+                )}
+              </div>
+              <ul className="list-disc pl-5 mt-2 space-y-1 text-gray-700">
+                {explanation.reasons.map((reason, reasonIndex) => (
+                  <li key={`${reason}-${reasonIndex}`}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
 
     {/* Staff */}
     <div
