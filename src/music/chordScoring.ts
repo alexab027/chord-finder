@@ -2,6 +2,7 @@ import type {
   ChordCandidate,
   ChordQuality,
   ChordScoreContext,
+  GenerationPreferences,
   KeyContext,
   PlacedNote,
   ScoreResult,
@@ -61,7 +62,10 @@ function getMeasureMelodyPcs(
 export function scoreMelodyFit(
   candidate: ChordCandidate,
   melodyNotes: PlacedNote[],
-  getRenderedPitchFn: (note: PlacedNote) => string
+  getRenderedPitchFn: (note: PlacedNote) => string,
+  // Scales the penalty for clashing with the main melody note. 1 = full
+  // penalty (default / dropdown path); higher dissonance tolerance lowers it.
+  clashMultiplier = 1
 ): ScoreResult {
   const melodyPcs = getMeasureMelodyPcs(melodyNotes, getRenderedPitchFn);
   if (melodyPcs.length === 0) return { points: 0, reasons: [] };
@@ -77,7 +81,7 @@ export function scoreMelodyFit(
     points += 5;
     reasons.push(`Contains the main melody note ${mainMelody.label}`);
   } else {
-    points -= 4;
+    points -= 4 * clashMultiplier;
     reasons.push(`Does not contain the main melody note ${mainMelody.label}`);
   }
 
@@ -115,6 +119,52 @@ export function scoreKeyFit(
 
 function isSeventhOrExtendedQuality(quality: ChordQuality) {
   return ["add9", "maj7", "min7", "dom7"].includes(quality);
+}
+
+function isSeventhQuality(quality: ChordQuality) {
+  return ["maj7", "min7", "dom7"].includes(quality);
+}
+
+function isSuspendedQuality(quality: ChordQuality) {
+  return quality === "sus" || quality === "sus2" || quality === "sus4";
+}
+
+// Scores how the candidate's bass relates to the previous chord's bass.
+// `weight` scales every reward/penalty: at weight 1 this reproduces the
+// engine's original "descendingBass" scoring exactly.
+function scoreBassMotion(
+  candidate: ChordCandidate,
+  previousChord: ChordCandidate,
+  weight: number
+): ScoreResult {
+  const reasons: string[] = [];
+  let points = 0;
+
+  const downwardDistance = mod12(previousChord.bassPc - candidate.bassPc);
+  const upwardDistance = mod12(candidate.bassPc - previousChord.bassPc);
+
+  if (candidate.inversion && candidate.bassName) {
+    reasons.push(
+      `Uses an inversion to put ${getNoteNameLabel(candidate.bassName)} in the bass`
+    );
+  }
+
+  if (downwardDistance > 0 && downwardDistance < upwardDistance) {
+    points += 5 * weight;
+    reasons.push("Moves the bass downward from the previous chord");
+  }
+
+  if (downwardDistance > 0 && downwardDistance <= 2) {
+    points += 3 * weight;
+    reasons.push("Creates smooth stepwise bass motion");
+  }
+
+  if (upwardDistance > 4 && upwardDistance < downwardDistance) {
+    points -= 3 * weight;
+    reasons.push("Creates an awkward upward bass jump");
+  }
+
+  return { points, reasons };
 }
 
 export function scoreStyle(
@@ -169,29 +219,54 @@ export function scoreStyle(
     }
   }
 
-  if (style === "descendingBass" && context.previousChord) {
-    const downwardDistance = mod12(context.previousChord.bassPc - candidate.bassPc);
-    const upwardDistance = mod12(candidate.bassPc - context.previousChord.bassPc);
+  // Bass motion is driven by descendingBassWeight on the AI path. On the
+  // dropdown path it is gated on the "descendingBass" style at full strength,
+  // preserving the engine's original behavior.
+  const descendingBassWeight = context.preferences
+    ? context.preferences.descendingBassWeight
+    : style === "descendingBass"
+      ? 1
+      : 0;
 
-    if (candidate.inversion && candidate.bassName) {
-      reasons.push(
-        `Uses an inversion to put ${getNoteNameLabel(candidate.bassName)} in the bass`
-      );
-    }
+  if (descendingBassWeight > 0 && context.previousChord) {
+    const bassMotion = scoreBassMotion(
+      candidate,
+      context.previousChord,
+      descendingBassWeight
+    );
+    points += bassMotion.points;
+    reasons.push(...bassMotion.reasons);
+  }
 
-    if (downwardDistance > 0 && downwardDistance < upwardDistance) {
-      points += 5;
-      reasons.push("Moves the bass downward from the previous chord");
-    }
+  return { points, reasons };
+}
 
-    if (downwardDistance > 0 && downwardDistance <= 2) {
-      points += 3;
-      reasons.push("Creates smooth stepwise bass motion");
-    }
+// Rewards/penalizes a candidate against the interpreted complexity preferences.
+// Only used on the AI path (see scoreChord).
+export function scorePreferences(
+  candidate: ChordCandidate,
+  preferences: GenerationPreferences
+): ScoreResult {
+  const reasons: string[] = [];
+  let points = 0;
 
-    if (upwardDistance > 4 && upwardDistance < downwardDistance) {
-      points -= 3;
-      reasons.push("Creates an awkward upward bass jump");
+  if (preferences.preferSevenths && isSeventhQuality(candidate.quality)) {
+    points += 3;
+    reasons.push("Uses a seventh chord to add the requested harmonic color.");
+  }
+
+  if (preferences.preferSuspensions && isSuspendedQuality(candidate.quality)) {
+    points += 3;
+    reasons.push("Uses a suspension for gentle tension.");
+  }
+
+  if (preferences.complexity <= 0.3) {
+    if (candidate.quality === "triad") {
+      points += 2;
+      reasons.push("Keeps the harmony simple and direct.");
+    } else if (isSeventhOrExtendedQuality(candidate.quality)) {
+      points -= 2;
+      reasons.push("Avoids extra complexity for a simpler sound.");
     }
   }
 
@@ -233,12 +308,27 @@ export function scoreChord(
   candidate: ChordCandidate,
   context: ChordScoreContext
 ): ScoredChord {
-  const scoreParts = [
-    scoreMelodyFit(candidate, context.measureNotes, context.getRenderedPitchFn),
+  // dissonanceTolerance softens the melody-clash penalty: 0 -> full penalty,
+  // 1 -> only 20% of it. Never reaches zero. Dropdown path keeps full penalty.
+  const clashMultiplier = context.preferences
+    ? 1 - 0.8 * context.preferences.dissonanceTolerance
+    : 1;
+
+  const scoreParts: ScoreResult[] = [
+    scoreMelodyFit(
+      candidate,
+      context.measureNotes,
+      context.getRenderedPitchFn,
+      clashMultiplier
+    ),
     scoreKeyFit(candidate, context.key),
     scoreStyle(candidate, context.style, context),
     scoreProgression(context.previousChord, candidate),
   ];
+
+  if (context.preferences) {
+    scoreParts.push(scorePreferences(candidate, context.preferences));
+  }
 
   return {
     chord: candidate,

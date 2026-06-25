@@ -67,12 +67,25 @@ export type ScoredChord = {
   bassMidi?: number;
 };
 
+export type GenerationPreferences = {
+  style: StyleOption;
+  descendingBassWeight: number;
+  complexity: number;
+  dissonanceTolerance: number;
+  cadenceStrength: number;
+  preferSevenths: boolean;
+  preferSuspensions: boolean;
+};
+
 export type ChordScoreContext = {
   key: KeyContext;
   style: StyleOption;
   measureNotes: PlacedNote[];
   getRenderedPitchFn: (note: PlacedNote) => string;
   previousChord?: ChordCandidate;
+  // Present only on the AI-interpreted path. When undefined, scoring behaves
+  // exactly as the dropdown-only engine always has.
+  preferences?: GenerationPreferences;
 };
 
 export type TimeSignature = {

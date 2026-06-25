@@ -27,10 +27,49 @@ import {
 import type {
   DurationName,
   GenerationMode,
+  GenerationPreferences,
   PlacedChord,
   PlacedNote,
   StyleOption,
 } from "../music/types";
+import type { InterpretedStyle } from "../ai/types";
+import { toGenerationPreferences } from "../ai/toGenerationPreferences";
+
+const STYLE_LABELS: Record<StyleOption, string> = {
+  simple: "Simple",
+  jazzy: "Jazzy",
+  bluesy: "Bluesy",
+  descendingBass: "Descending bass",
+};
+
+// Pure display helper: turns an interpretation into a compact one-line summary
+// such as "Jazzy · low dissonance · strong cadence · descending bass".
+function describeInterpretation(interpretation: InterpretedStyle): string {
+  const band = (value: number, low: string, mid: string, high: string) =>
+    value <= 0.34 ? low : value >= 0.66 ? high : mid;
+
+  const parts = [
+    STYLE_LABELS[interpretation.primaryStyle],
+    band(
+      interpretation.dissonanceTolerance,
+      "low dissonance",
+      "moderate dissonance",
+      "high dissonance"
+    ),
+    band(
+      interpretation.cadenceStrength,
+      "soft cadence",
+      "moderate cadence",
+      "strong cadence"
+    ),
+  ];
+
+  if (interpretation.descendingBassWeight >= 0.5) parts.push("descending bass");
+  if (interpretation.preferSevenths) parts.push("sevenths");
+  if (interpretation.preferSuspensions) parts.push("suspensions");
+
+  return parts.join(" · ");
+}
 
 const NOTE_DURATION_OPTIONS: {
   duration: DurationName;
@@ -64,6 +103,14 @@ export default function Staff() {
   const [chordStyle, setChordStyle] = useState<StyleOption>("simple");
   const [selectedAccidental, setSelectedAccidental] =
   useState<"#" | "b" | "n" | null>(null);
+
+  // AI style-interpretation UI state. Display-only for now: the deterministic
+  // engine still drives chord generation (see generateChords).
+  const [stylePrompt, setStylePrompt] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [aiInterpretation, setAiInterpretation] =
+    useState<InterpretedStyle | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   // Stores the real top and bottom staff line y-values from VexFlow
   const topStaffLineYRef = useRef<number>(40);
@@ -470,57 +517,130 @@ export default function Staff() {
     return PITCHES_TOP_TO_BOTTOM[clampedIndex];
   }
 
-  function generateChords() {
-    const generatedKey = getGenerationKey(
-      keySignature,
-      generationMode,
-      measures,
-      getRenderedPitch
-    );
-    const progression = chooseProgression(
-      generatedKey,
-      measures,
-      getRenderedPitch,
-      chordStyle
-    );
+  // Shared call to the server-side Groq route. Returns the interpreted style
+  // (possibly carrying a `warning` when the server fell back to defaults), or
+  // null if the request itself could not complete.
+  async function fetchInterpretation(
+    prompt: string
+  ): Promise<(InterpretedStyle & { warning?: string }) | null> {
+    try {
+      const response = await fetch("/api/interpret-style", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      return (await response.json()) as InterpretedStyle & { warning?: string };
+    } catch {
+      return null;
+    }
+  }
 
-    let previousBassMidi: number | undefined;
-    const newChordMeasures: PlacedChord[][] = progression.map(
-      (scoredChord, measureIndex) => {
-        const chord = scoredChord.chord;
-        const lowestMelodyMidi = getMeasureLowestMelodyMidi(
-          measures[measureIndex],
-          getRenderedPitch
-        );
-        const pitches = getCloseChordVoicingForPcs(
-          chord.pcs,
-          chord.noteNames,
-          lowestMelodyMidi,
-          chordStyle === "descendingBass" ? previousBassMidi : undefined
-        );
+  // Preview button: interprets the prompt and shows the settings without
+  // generating chords.
+  async function handleInterpretStyle() {
+    setAiError(null);
+    setIsGenerating(true);
 
-        previousBassMidi = parsePitchToMidi(pitches[0]) ?? previousBassMidi;
+    const data = await fetchInterpretation(stylePrompt);
+    if (!data) {
+      setAiInterpretation(null);
+      setAiError(
+        "AI interpretation was unavailable. The selected dropdown style was used instead."
+      );
+    } else {
+      setAiInterpretation(data);
+      if (data.warning) setAiError(data.warning);
+    }
 
-        return [
-          {
-            slot: 0,
-            duration: "w",
-            durationSlots: 8,
-            pitches,
-            symbol: chord.name,
-            score: scoredChord.score,
-            reasons: scoredChord.reasons,
-          },
-        ];
+    setIsGenerating(false);
+  }
+
+  async function generateChords() {
+    setIsGenerating(true);
+
+    try {
+      // Step 1 (primaryStyle): when a non-empty prompt is supplied, interpret it
+      // and let it drive the style + preferences. Empty prompt or any Groq
+      // failure falls back to the dropdown style with no preferences, which is
+      // exactly the engine's original behavior.
+      const normalizedPrompt = stylePrompt.trim();
+      let effectiveStyle: StyleOption = chordStyle;
+      let preferences: GenerationPreferences | undefined;
+
+      if (normalizedPrompt !== "") {
+        const data = await fetchInterpretation(normalizedPrompt);
+
+        if (data && !data.warning) {
+          setAiInterpretation(data);
+          setAiError(null);
+          effectiveStyle = data.primaryStyle;
+          preferences = toGenerationPreferences(data);
+        } else {
+          setAiInterpretation(null);
+          setAiError(
+            data?.warning ??
+              "AI interpretation was unavailable. The selected dropdown style was used instead."
+          );
+        }
+      } else {
+        setAiInterpretation(null);
+        setAiError(null);
       }
-    );
 
-    setChordMeasures(newChordMeasures);
-    setProgressionInfo(
-      `Generated in ${generatedKey.label}: ${progression
-        .map((scoredChord) => scoredChord.chord.name)
-        .join(" - ")}`
-    );
+      const generatedKey = getGenerationKey(
+        keySignature,
+        generationMode,
+        measures,
+        getRenderedPitch
+      );
+      const progression = chooseProgression(
+        generatedKey,
+        measures,
+        getRenderedPitch,
+        effectiveStyle,
+        preferences
+      );
+
+      let previousBassMidi: number | undefined;
+      const newChordMeasures: PlacedChord[][] = progression.map(
+        (scoredChord, measureIndex) => {
+          const chord = scoredChord.chord;
+          const lowestMelodyMidi = getMeasureLowestMelodyMidi(
+            measures[measureIndex],
+            getRenderedPitch
+          );
+          const pitches = getCloseChordVoicingForPcs(
+            chord.pcs,
+            chord.noteNames,
+            lowestMelodyMidi,
+            effectiveStyle === "descendingBass" ? previousBassMidi : undefined
+          );
+
+          previousBassMidi = parsePitchToMidi(pitches[0]) ?? previousBassMidi;
+
+          return [
+            {
+              slot: 0,
+              duration: "w",
+              durationSlots: 8,
+              pitches,
+              symbol: chord.name,
+              score: scoredChord.score,
+              reasons: scoredChord.reasons,
+            },
+          ];
+        }
+      );
+
+      setChordMeasures(newChordMeasures);
+      setProgressionInfo(
+        `Generated in ${generatedKey.label}: ${progression
+          .map((scoredChord) => scoredChord.chord.name)
+          .join(" - ")}`
+      );
+    } finally {
+      setIsGenerating(false);
+    }
 }
 
 
@@ -743,9 +863,14 @@ return (
           <div className="text-xs text-gray-500 mb-1">New progression</div>
           <button
             onClick={generateChords}
-            className="bg-indigo-700 text-white border border-indigo-900 rounded px-4 h-10 hover:bg-indigo-600"
+            disabled={isGenerating}
+            className={
+              isGenerating
+                ? "bg-gray-200 text-gray-500 border border-gray-300 rounded px-4 h-10 cursor-not-allowed"
+                : "bg-indigo-700 text-white border border-indigo-900 rounded px-4 h-10 hover:bg-indigo-600"
+            }
           >
-            Generate
+            {isGenerating ? "Generating…" : "Generate"}
           </button>
         </div>
         <div>
@@ -796,7 +921,52 @@ return (
       </div>
     </div>
 
-<p className="text-sm text-gray-700">{progressionInfo}</p>
+    {/* Natural-language style prompt (display-only for now) */}
+    <div className="space-y-2" style={{ width: rendererWidth }}>
+      <label className="flex flex-col gap-2 max-w-xl">
+        <span className="text-sm font-medium text-gray-700">
+          Describe the harmony you want
+        </span>
+        <textarea
+          value={stylePrompt}
+          onChange={(event) => setStylePrompt(event.target.value)}
+          maxLength={500}
+          rows={3}
+          placeholder="Warm and jazzy with a descending bass and a satisfying ending"
+          className="rounded-md border border-gray-400 bg-white text-black px-3 py-2 text-sm"
+        />
+      </label>
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          onClick={handleInterpretStyle}
+          disabled={isGenerating || stylePrompt.trim() === ""}
+          className={
+            isGenerating || stylePrompt.trim() === ""
+              ? "bg-gray-200 text-gray-500 border border-gray-300 rounded px-4 h-10 cursor-not-allowed"
+              : "bg-indigo-700 text-white border border-indigo-900 rounded px-4 h-10 hover:bg-indigo-600"
+          }
+        >
+          {isGenerating ? "Interpreting…" : "Interpret style"}
+        </button>
+
+        {aiInterpretation && (
+          <span className="text-sm text-gray-700">
+            Interpreted as: {describeInterpretation(aiInterpretation)}
+          </span>
+        )}
+      </div>
+
+      {aiInterpretation?.summary && (
+        <p className="text-xs text-gray-500 max-w-xl">
+          {aiInterpretation.summary}
+        </p>
+      )}
+
+      {aiError && <p className="text-xs text-amber-700">{aiError}</p>}
+    </div>
+
+    <p className="text-sm text-gray-700">{progressionInfo}</p>
 
     {chordExplanations.length > 0 && (
       <div
@@ -816,7 +986,7 @@ return (
                 </div>
                 {explanation.score !== undefined && (
                   <div className="text-xs text-gray-500">
-                    Score {explanation.score}
+                    Score {Math.round(explanation.score)}
                   </div>
                 )}
               </div>

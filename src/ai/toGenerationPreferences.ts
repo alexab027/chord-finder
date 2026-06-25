@@ -1,0 +1,16 @@
+import type { InterpretedStyle } from "./types";
+import type { GenerationPreferences } from "@/src/music/types";
+
+export function toGenerationPreferences(
+  interpretation: InterpretedStyle,
+): GenerationPreferences {
+  return {
+    style: interpretation.primaryStyle,
+    descendingBassWeight: interpretation.descendingBassWeight,
+    complexity: interpretation.complexity,
+    dissonanceTolerance: interpretation.dissonanceTolerance,
+    cadenceStrength: interpretation.cadenceStrength,
+    preferSevenths: interpretation.preferSevenths,
+    preferSuspensions: interpretation.preferSuspensions,
+  };
+}

@@ -106,7 +106,7 @@ function buildMajorKeyChords(key: KeyContext): ChordCandidate[] {
     const fifth = scaleSpellings[(degreeIndex + 4) % 7];
     const pcs = [degree.pc, third.pc, fifth.pc];
     const noteNames = [degree.name, third.name, fifth.name];
-    const triad = {
+    const triad: ChordCandidate = {
       degree: degreeIndex + 1,
       name: romanNumerals[degreeIndex],
       rootPc: degree.pc,
@@ -352,7 +352,7 @@ export function buildKeyChords(key: KeyContext): ChordCandidate[] {
       spellPitchClassForLetter(pcs[1], third.name[0]),
       spellPitchClassForLetter(pcs[2], fifth.name[0]),
     ];
-    const triad = {
+    const triad: ChordCandidate = {
       degree: degreeIndex + 1,
       name: ROMAN_NUMERALS[key.mode][degreeIndex],
       rootPc: degree.pc,
