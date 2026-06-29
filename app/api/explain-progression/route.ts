@@ -27,6 +27,8 @@ const SYSTEM_PROMPT = `You explain a chord progression that has already been cho
 
 Strict rules:
 - Use ONLY the supplied key, chord names, scores, style summary, and reasons.
+- The supplied "progression" is the FINAL, actual result. Describe only those chords.
+- "styleRequest" is what the user ASKED for and may describe edits or chords they wanted. It is NOT the result. Never state or imply that a requested change was made. Only mention a chord if it appears in the supplied "progression" for that measure. If the request asked for a chord that is not present in the final progression, do not describe it as if it exists.
 - Do not change the progression, reorder it, or suggest different chords.
 - Do not invent melody notes.
 - Do not invent chord functions (e.g. "dominant", "subdominant") that are not in the supplied reasons.

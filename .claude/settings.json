@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npx --yes tsx \"C:\\\\Users\\\\Alex\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Alex-projects-chord-finder\\\\78122912-d376-4b26-954d-12545c84df24\\\\scratchpad\\\\copy-proof.ts\")"
+    ]
+  }
+}

@@ -335,6 +335,94 @@ function buildSeventhChordCandidates(
   return candidates;
 }
 
+// Quality vocabulary the model is allowed to request for a set_chord action.
+export type RequestedChordQuality =
+  | "major"
+  | "minor"
+  | "dominant"
+  | "diminished";
+
+// Deterministically resolve a single chord from a scale degree + requested
+// quality (+ optional 7th) within the current key. The model never returns a
+// ChordCandidate or pitch names — only degree/quality/extension/measure — and
+// this function turns that into a concrete root-position chord using the same
+// scale-spelling, triad, and voicing primitives the generator uses.
+export function buildRequestedChord(
+  key: KeyContext,
+  degree: number,
+  quality: RequestedChordQuality,
+  extension?: 7
+): ChordCandidate {
+  const degreeIndex = ((degree - 1) % 7 + 7) % 7;
+  const scaleSpellings = buildScaleSpellings(key);
+  const root = scaleSpellings[degreeIndex];
+  const romanBase = ROMAN_NUMERALS[key.mode][degreeIndex];
+
+  const triadQuality: "major" | "minor" | "dim" =
+    quality === "minor"
+      ? "minor"
+      : quality === "diminished"
+        ? "dim"
+        : "major"; // major + dominant both use a major triad
+  const triadPcs = getTriadPcs(root.pc, triadQuality);
+
+  const rootName = spellPitchClassForLetter(triadPcs[0], root.name[0]);
+  const thirdName = spellPitchClassForLetter(
+    triadPcs[1],
+    getScaleLetter(root.name, 2)
+  );
+  const fifthName = spellPitchClassForLetter(
+    triadPcs[2],
+    getScaleLetter(root.name, 4)
+  );
+
+  if (extension !== 7) {
+    const noteNames = [rootName, thirdName, fifthName];
+    return {
+      degree: degreeIndex + 1,
+      name: romanBase,
+      rootPc: triadPcs[0],
+      bassPc: triadPcs[0],
+      pcs: triadPcs,
+      noteNames,
+      pitches: getCloseChordVoicingPitches(
+        triadPcs[0],
+        triadPcs[1],
+        triadPcs[2],
+        noteNames
+      ),
+      quality: "triad",
+      keyFit: "diatonic",
+    };
+  }
+
+  // maj7 = +11; minor/dominant b7 = +10; diminished + 7 = half-diminished (+10).
+  const seventhInterval = quality === "major" ? 11 : 10;
+  const engineQuality: "maj7" | "min7" | "dom7" =
+    quality === "major" ? "maj7" : quality === "dominant" ? "dom7" : "min7";
+  const suffix = quality === "diminished" ? "m7b5" : engineQuality;
+
+  const seventhPc = mod12(triadPcs[0] + seventhInterval);
+  const seventhName = spellPitchClassForLetter(
+    seventhPc,
+    getScaleLetter(root.name, 6)
+  );
+  const pcs = [...triadPcs, seventhPc];
+  const noteNames = [rootName, thirdName, fifthName, seventhName];
+
+  return {
+    degree: degreeIndex + 1,
+    name: `${romanBase}${suffix}`,
+    rootPc: pcs[0],
+    bassPc: pcs[0],
+    pcs,
+    noteNames,
+    pitches: getCloseChordVoicingForPcs(pcs, noteNames),
+    quality: engineQuality,
+    keyFit: "diatonic",
+  };
+}
+
 export function buildKeyChords(key: KeyContext): ChordCandidate[] {
   if (key.mode === "major") {
     return buildMajorKeyChords(key);
