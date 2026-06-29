@@ -241,6 +241,56 @@ export function scoreStyle(
   return { points, reasons };
 }
 
+// Rewards a candidate for matching the progression the user is revising. The
+// model never picks chords; it only sets how strongly similarity is rewarded
+// (via preserveOverallProgression / changeAmount / locked positions).
+export function scoreRevisionSimilarity(
+  candidate: ChordCandidate,
+  context: ChordScoreContext
+): ScoreResult {
+  const target = context.revisionTarget;
+  const revision = context.revision;
+  if (!target || !revision) return { points: 0, reasons: [] };
+
+  const reasons: string[] = [];
+  let points = 0;
+
+  const degreeMatch = candidate.degree === target.degree;
+  const qualityMatch = candidate.quality === target.quality;
+  const bassMatch = candidate.bassPc === target.bassPc;
+  // 0 (large change requested) .. 1 (keep as-is). Scales the soft reward.
+  const similarityWeight = 1 - revision.changeAmount;
+
+  if (context.revisionLocked) {
+    // This position was explicitly requested to stay the same: dominate scoring
+    // so the search effectively locks the chord at this measure.
+    if (degreeMatch) {
+      points += 30;
+      reasons.push("Preserves the previous chord as requested.");
+    }
+    if (qualityMatch) points += 8;
+    if (bassMatch) points += 4;
+    return { points, reasons };
+  }
+
+  if (revision.preserveOverallProgression && degreeMatch) {
+    // A base reward keeps the same harmonic root even for large changes; the
+    // scaled part rewards staying close when only a small change was asked for.
+    points += 4 + 8 * similarityWeight;
+
+    if (qualityMatch) {
+      points += 3 * similarityWeight;
+      reasons.push("Keeps the previous chord on the same scale degree.");
+    } else if (isSeventhQuality(candidate.quality)) {
+      reasons.push("Adds a seventh while keeping the same harmonic root.");
+    } else {
+      reasons.push("Keeps the same harmonic root as the previous version.");
+    }
+  }
+
+  return { points, reasons };
+}
+
 // Rewards/penalizes a candidate against the interpreted complexity preferences.
 // Only used on the AI path (see scoreChord).
 export function scorePreferences(
@@ -328,6 +378,10 @@ export function scoreChord(
 
   if (context.preferences) {
     scoreParts.push(scorePreferences(candidate, context.preferences));
+  }
+
+  if (context.revision) {
+    scoreParts.push(scoreRevisionSimilarity(candidate, context));
   }
 
   return {

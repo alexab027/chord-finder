@@ -32,3 +32,29 @@ export const ALLOWED_STYLES: StyleOption[] = [
   "bluesy",
   "descendingBass",
 ];
+
+// Returned by the interpretation route only when the request says a progression
+// already exists. It tells the deterministic engine HOW MUCH to keep, never
+// which chords to use — the model does not choose chords.
+export type RevisionIntent = {
+  // Keep the same general progression vs. allow broad replacement.
+  preserveOverallProgression: boolean;
+  // 1-based measure numbers the user explicitly asked to keep unchanged.
+  preserveChordPositions: number[];
+  // 0 = tiny tweak, 1 = large change. Scales how strongly similarity is rewarded.
+  changeAmount: number;
+  // Relative nudges (in [-1, 1]) applied on top of the current preferences.
+  requestedChanges: {
+    complexityDelta?: number;
+    dissonanceDelta?: number;
+    descendingBassDelta?: number;
+    cadenceDelta?: number;
+  };
+};
+
+export const DEFAULT_REVISION_INTENT: RevisionIntent = {
+  preserveOverallProgression: true,
+  preserveChordPositions: [],
+  changeAmount: 0.3,
+  requestedChanges: {},
+};

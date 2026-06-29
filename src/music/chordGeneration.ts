@@ -4,6 +4,8 @@ import type {
   KeyContext,
   KeyMode,
   PlacedNote,
+  RevisionChordTarget,
+  RevisionContext,
   ScoredChord,
   StyleOption,
 } from "./types";
@@ -122,6 +124,12 @@ function getBestScoredChordForMeasure(
     previousChord?: ChordCandidate;
     previousBassMidi?: number;
     preferences?: GenerationPreferences;
+    revision?: {
+      preserveOverallProgression: boolean;
+      changeAmount: number;
+    };
+    revisionTarget?: RevisionChordTarget;
+    revisionLocked?: boolean;
   }
 ) {
   // The original octave-planned bass mechanism runs only on the dropdown
@@ -180,9 +188,16 @@ function scoreChordPath(
   measures: PlacedNote[][],
   getRenderedPitchFn: (note: PlacedNote) => string,
   style: StyleOption,
-  preferences?: GenerationPreferences
+  preferences?: GenerationPreferences,
+  revision?: RevisionContext
 ) {
   const useLegacyDescendingBass = style === "descendingBass" && !preferences;
+  const revisionFlags = revision
+    ? {
+        preserveOverallProgression: revision.preserveOverallProgression,
+        changeAmount: revision.changeAmount,
+      }
+    : undefined;
   const scoredChords: ScoredChord[] = [];
   let candidateScore = 0;
   let transitionScore = 0;
@@ -201,6 +216,10 @@ function scoreChordPath(
       previousChord,
       previousBassMidi,
       preferences,
+      revision: revisionFlags,
+      revisionTarget: revision?.targets[measureIndex],
+      revisionLocked:
+        revision?.preserveChordPositions.includes(measureIndex + 1) ?? false,
     });
     const bassMidi = useLegacyDescendingBass
       ? scoredChord.bassMidi ?? getPlannedBassMidi(scoredChord.chord)
@@ -250,7 +269,8 @@ export function chooseProgression(
   measures: PlacedNote[][],
   getRenderedPitchFn: (note: PlacedNote) => string,
   style: StyleOption,
-  preferences?: GenerationPreferences
+  preferences?: GenerationPreferences,
+  revision?: RevisionContext
 ) {
   const chords = buildKeyChords(key);
   const startDegrees = key.mode === "major" ? [1, 6, 4] : [1, 6, 3];
@@ -267,7 +287,8 @@ export function chooseProgression(
         measures,
         getRenderedPitchFn,
         style,
-        preferences
+        preferences,
+        revision
       )
     )
     .sort((a, b) => b.score - a.score);

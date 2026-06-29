@@ -30,45 +30,86 @@ import type {
   GenerationPreferences,
   PlacedChord,
   PlacedNote,
+  RevisionContext,
+  ScoredChord,
   StyleOption,
 } from "../music/types";
-import type { InterpretedStyle } from "../ai/types";
+import {
+  DEFAULT_INTERPRETED_STYLE,
+  type InterpretedStyle,
+  type RevisionIntent,
+} from "../ai/types";
 import { toGenerationPreferences } from "../ai/toGenerationPreferences";
 
-const STYLE_LABELS: Record<StyleOption, string> = {
-  simple: "Simple",
-  jazzy: "Jazzy",
-  bluesy: "Bluesy",
-  descendingBass: "Descending bass",
+type AiProgressionExplanation = {
+  overview: string;
+  measures: Array<{
+    measure: number;
+    chord: string;
+    explanation: string;
+  }>;
 };
 
-// Pure display helper: turns an interpretation into a compact one-line summary
-// such as "Jazzy · low dissonance · strong cadence · descending bass".
-function describeInterpretation(interpretation: InterpretedStyle): string {
-  const band = (value: number, low: string, mid: string, high: string) =>
-    value <= 0.34 ? low : value >= 0.66 ? high : mid;
+type ExplanationRequest = {
+  key: string;
+  styleRequest: string;
+  styleSummary: string;
+  progression: Array<{
+    measure: number;
+    symbol: string;
+    romanNumeral: string;
+    score?: number;
+    reasons: string[];
+  }>;
+};
 
-  const parts = [
-    STYLE_LABELS[interpretation.primaryStyle],
-    band(
-      interpretation.dissonanceTolerance,
-      "low dissonance",
-      "moderate dissonance",
-      "high dissonance"
+// The Style dropdown was removed; a blank prompt uses the engine's original
+// default behavior (style "simple", no AI preferences).
+const BLANK_PROMPT_STYLE: StyleOption = "simple";
+
+const PROMPT_HELPER_TEXT =
+  'Leave this blank to generate the progression that best fits your melody. ' +
+  'After generating, you can ask for changes such as "keep this progression ' +
+  'but make it more complex."';
+
+const FRESH_PLACEHOLDER =
+  "Example: Warm and jazzy with a descending bass and a strong ending";
+
+const REVISION_PLACEHOLDER =
+  "Example: Keep this progression but make it slightly more complex";
+
+function clampPref(value: number) {
+  return Math.min(1, Math.max(0, value));
+}
+
+// Applies the model's relative revision nudges on top of the preferences that
+// produced the current progression.
+function applyRevisionDeltas(
+  base: GenerationPreferences,
+  changes: RevisionIntent["requestedChanges"]
+): GenerationPreferences {
+  const complexityDelta = changes.complexityDelta ?? 0;
+
+  return {
+    style: base.style,
+    descendingBassWeight: clampPref(
+      base.descendingBassWeight + (changes.descendingBassDelta ?? 0)
     ),
-    band(
-      interpretation.cadenceStrength,
-      "soft cadence",
-      "moderate cadence",
-      "strong cadence"
+    complexity: clampPref(base.complexity + complexityDelta),
+    dissonanceTolerance: clampPref(
+      base.dissonanceTolerance + (changes.dissonanceDelta ?? 0)
     ),
-  ];
-
-  if (interpretation.descendingBassWeight >= 0.5) parts.push("descending bass");
-  if (interpretation.preferSevenths) parts.push("sevenths");
-  if (interpretation.preferSuspensions) parts.push("suspensions");
-
-  return parts.join(" · ");
+    cadenceStrength: clampPref(
+      base.cadenceStrength + (changes.cadenceDelta ?? 0)
+    ),
+    preferSevenths:
+      complexityDelta > 0.25
+        ? true
+        : complexityDelta < -0.25
+          ? false
+          : base.preferSevenths,
+    preferSuspensions: base.preferSuspensions,
+  };
 }
 
 const NOTE_DURATION_OPTIONS: {
@@ -77,7 +118,7 @@ const NOTE_DURATION_OPTIONS: {
   title: string;
 }[] = [
   { duration: "w", label: "𝅝", title: "Whole note" },
-  { duration: "h", label: "𝅗𝅥", title: "Half note" },
+  { duration: "h", label: "𝅗𝅥", title: "Half note" },
   { duration: "q", label: "♩", title: "Quarter note" },
   { duration: "8", label: "♪", title: "Eighth note" },
 ];
@@ -100,17 +141,28 @@ export default function Staff() {
   const [keySignature, setKeySignature] = useState("C");
   const [generationMode, setGenerationMode] =
     useState<GenerationMode>("automatic");
-  const [chordStyle, setChordStyle] = useState<StyleOption>("simple");
   const [selectedAccidental, setSelectedAccidental] =
   useState<"#" | "b" | "n" | null>(null);
 
-  // AI style-interpretation UI state. Display-only for now: the deterministic
-  // engine still drives chord generation (see generateChords).
+  // Harmony prompt + the interpretation behind the current progression. The
+  // interpretation is kept internally (used as the base for revisions and as the
+  // style summary for the explanation); it is no longer shown to the user.
   const [stylePrompt, setStylePrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiInterpretation, setAiInterpretation] =
     useState<InterpretedStyle | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+
+  // The full scored progression behind the rendered chords. Kept in a ref (not
+  // rendered) so revisions can pass the current chord identities into scoring.
+  const lastProgressionRef = useRef<ScoredChord[] | null>(null);
+
+  // Plain-English explanation of the current progression. Requested
+  // automatically after each generation; grounded only in engine output.
+  const [aiExplanation, setAiExplanation] =
+    useState<AiProgressionExplanation | null>(null);
+  const [isExplaining, setIsExplaining] = useState(false);
+  const [aiExplainError, setAiExplainError] = useState<string | null>(null);
 
   // Stores the real top and bottom staff line y-values from VexFlow
   const topStaffLineYRef = useRef<number>(40);
@@ -517,74 +569,158 @@ export default function Staff() {
     return PITCHES_TOP_TO_BOTTOM[clampedIndex];
   }
 
-  // Shared call to the server-side Groq route. Returns the interpreted style
-  // (possibly carrying a `warning` when the server fell back to defaults), or
-  // null if the request itself could not complete.
+  // Calls the server-side Groq route. When a current progression is supplied the
+  // route also returns revision intent. Returns null only if the request itself
+  // could not complete. No client-side cache is used, so revising the same text
+  // against a different current progression always asks the route fresh.
   async function fetchInterpretation(
-    prompt: string
-  ): Promise<(InterpretedStyle & { warning?: string }) | null> {
+    prompt: string,
+    currentProgression?: Array<{ measure: number; romanNumeral: string }>
+  ): Promise<
+    (InterpretedStyle & { warning?: string; revision?: RevisionIntent }) | null
+  > {
     try {
       const response = await fetch("/api/interpret-style", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({
+          prompt,
+          hasProgression: !!currentProgression,
+          currentProgression,
+        }),
       });
-      return (await response.json()) as InterpretedStyle & { warning?: string };
+      return (await response.json()) as InterpretedStyle & {
+        warning?: string;
+        revision?: RevisionIntent;
+      };
     } catch {
       return null;
     }
   }
 
-  // Preview button: interprets the prompt and shows the settings without
-  // generating chords.
-  async function handleInterpretStyle() {
-    setAiError(null);
-    setIsGenerating(true);
-
-    const data = await fetchInterpretation(stylePrompt);
-    if (!data) {
-      setAiInterpretation(null);
-      setAiError(
-        "AI interpretation was unavailable. The selected dropdown style was used instead."
-      );
-    } else {
-      setAiInterpretation(data);
-      if (data.warning) setAiError(data.warning);
-    }
-
-    setIsGenerating(false);
-  }
-
-  async function generateChords() {
-    setIsGenerating(true);
+  // Best-effort plain-English explanation. Failures never block or undo a
+  // generated progression.
+  async function requestExplanation(requestBody: ExplanationRequest) {
+    setIsExplaining(true);
 
     try {
-      // Step 1 (primaryStyle): when a non-empty prompt is supplied, interpret it
-      // and let it drive the style + preferences. Empty prompt or any Groq
-      // failure falls back to the dropdown style with no preferences, which is
-      // exactly the engine's original behavior.
+      const response = await fetch("/api/explain-progression", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        setAiExplainError(
+          "Plain-English explanation is unavailable right now. The progression above is still ready to play."
+        );
+        return;
+      }
+
+      const data = (await response.json()) as AiProgressionExplanation;
+      setAiExplanation(data);
+    } catch {
+      setAiExplainError(
+        "Plain-English explanation is unavailable right now. The progression above is still ready to play."
+      );
+    } finally {
+      setIsExplaining(false);
+    }
+  }
+
+  // The single Generate/Update flow: interpret (if prompted), generate or revise
+  // deterministically, render, then auto-request the plain-English explanation.
+  async function handleGenerateProgression() {
+    setIsGenerating(true);
+    setAiError(null);
+    // Stale explanation is cleared as soon as generation begins.
+    setAiExplanation(null);
+    setAiExplainError(null);
+
+    let explanationContext: ExplanationRequest | null = null;
+
+    try {
       const normalizedPrompt = stylePrompt.trim();
-      let effectiveStyle: StyleOption = chordStyle;
+      const hadProgression = chordMeasures.some(
+        (measure) => measure.length > 0
+      );
+      const previousProgression = lastProgressionRef.current;
+
+      let effectiveStyle: StyleOption = BLANK_PROMPT_STYLE;
       let preferences: GenerationPreferences | undefined;
+      let revision: RevisionContext | undefined;
+      let styleSummary = "";
 
-      if (normalizedPrompt !== "") {
-        const data = await fetchInterpretation(normalizedPrompt);
+      if (normalizedPrompt === "") {
+        // Blank prompt: never calls Groq. Uses the engine's default behavior.
+        // With an existing progression this regenerates another high-ranking
+        // option (the engine's randomized top-window provides the variety).
+        setAiInterpretation(null);
+      } else {
+        const currentProgressionSummary =
+          hadProgression && previousProgression
+            ? previousProgression.map((scoredChord, index) => ({
+                measure: index + 1,
+                romanNumeral: scoredChord.chord.name,
+              }))
+            : undefined;
 
-        if (data && !data.warning) {
-          setAiInterpretation(data);
-          setAiError(null);
-          effectiveStyle = data.primaryStyle;
-          preferences = toGenerationPreferences(data);
-        } else {
+        const data = await fetchInterpretation(
+          normalizedPrompt,
+          currentProgressionSummary
+        );
+
+        if (!data || data.warning) {
+          // Groq unavailable: keep going with the engine's default behavior.
           setAiInterpretation(null);
           setAiError(
             data?.warning ??
-              "AI interpretation was unavailable. The selected dropdown style was used instead."
+              "AI interpretation was unavailable. A default progression was generated instead."
           );
+        } else if (hadProgression && previousProgression && data.revision) {
+          // Revision: start from the current progression's preferences, apply
+          // the requested deltas, and keep the current style.
+          const baseInterpretation =
+            aiInterpretation ?? DEFAULT_INTERPRETED_STYLE;
+          const applied = applyRevisionDeltas(
+            toGenerationPreferences(baseInterpretation),
+            data.revision.requestedChanges
+          );
+          effectiveStyle = baseInterpretation.primaryStyle;
+          preferences = applied;
+          revision = {
+            targets: previousProgression.map((scoredChord) => ({
+              degree: scoredChord.chord.degree,
+              rootPc: scoredChord.chord.rootPc,
+              quality: scoredChord.chord.quality,
+              bassPc: scoredChord.chord.bassPc,
+              inversion: scoredChord.chord.inversion,
+            })),
+            preserveOverallProgression:
+              data.revision.preserveOverallProgression,
+            preserveChordPositions: data.revision.preserveChordPositions,
+            changeAmount: data.revision.changeAmount,
+          };
+          const appliedInterpretation: InterpretedStyle = {
+            ...baseInterpretation,
+            primaryStyle: effectiveStyle,
+            descendingBassWeight: applied.descendingBassWeight,
+            complexity: applied.complexity,
+            dissonanceTolerance: applied.dissonanceTolerance,
+            cadenceStrength: applied.cadenceStrength,
+            preferSevenths: applied.preferSevenths,
+            preferSuspensions: applied.preferSuspensions,
+            summary: data.summary || baseInterpretation.summary,
+          };
+          setAiInterpretation(appliedInterpretation);
+          styleSummary = appliedInterpretation.summary;
+        } else {
+          // Fresh generation guided by the prompt.
+          effectiveStyle = data.primaryStyle;
+          preferences = toGenerationPreferences(data);
+          setAiInterpretation(data);
+          styleSummary = data.summary;
         }
-      } else {
-        setAiInterpretation(null);
-        setAiError(null);
       }
 
       const generatedKey = getGenerationKey(
@@ -593,13 +729,16 @@ export default function Staff() {
         measures,
         getRenderedPitch
       );
+
       const progression = chooseProgression(
         generatedKey,
         measures,
         getRenderedPitch,
         effectiveStyle,
-        preferences
+        preferences,
+        revision
       );
+      lastProgressionRef.current = progression;
 
       let previousBassMidi: number | undefined;
       const newChordMeasures: PlacedChord[][] = progression.map(
@@ -638,10 +777,35 @@ export default function Staff() {
           .map((scoredChord) => scoredChord.chord.name)
           .join(" - ")}`
       );
+
+      if (progression.length > 0) {
+        // Grounded explanation payload: scores + deterministic reasons stay
+        // internal here and feed the explanation; they are not shown raw.
+        explanationContext = {
+          key: generatedKey.label,
+          styleRequest: normalizedPrompt,
+          styleSummary,
+          progression: progression.map((scoredChord, index) => ({
+            measure: index + 1,
+            symbol: scoredChord.chord.name,
+            romanNumeral: scoredChord.chord.name,
+            score: scoredChord.score,
+            reasons: scoredChord.reasons,
+          })),
+        };
+      }
+    } catch (error) {
+      console.error("generateProgression failed:", error);
+      setAiError("Something went wrong while generating. Please try again.");
     } finally {
       setIsGenerating(false);
     }
-}
+
+    // Explanation runs after generation and must never undo it.
+    if (explanationContext) {
+      await requestExplanation(explanationContext);
+    }
+  }
 
 
 //playback
@@ -692,6 +856,11 @@ function handleAccidentalClick(accidental: "#" | "b" | "n") {
   function clearChords() {
     setChordMeasures([[], [], [], []]);
     setProgressionInfo("Chord progression cleared.");
+    // Clear all progression metadata + explanation so nothing is stale.
+    setAiExplanation(null);
+    setAiExplainError(null);
+    setAiInterpretation(null);
+    lastProgressionRef.current = null;
   }
 
   function durationButtonClass(duration: DurationName, kind: "note" | "rest") {
@@ -722,298 +891,262 @@ function handleAccidentalClick(accidental: "#" | "b" | "n") {
       : "border border-gray-300 rounded px-3 h-10 text-sm text-gray-400 cursor-not-allowed";
   }
 
-  const chordExplanations = chordMeasures.flatMap((measureChords, measureIndex) =>
-    measureChords.flatMap((chord) => {
-      if (!chord.reasons || chord.reasons.length === 0) return [];
-
-      return [
-        {
-          measureNumber: measureIndex + 1,
-          symbol: chord.symbol,
-          score: chord.score,
-          reasons: chord.reasons,
-        },
-      ];
-    })
-  );
+  const hasProgression = chordMeasures.some((measure) => measure.length > 0);
+  const visibleExplanationMeasures =
+    aiExplanation?.measures.filter((measure) => measure.explanation) ?? [];
 
 return (
-  <div className="bg-white border rounded-lg p-4 shadow space-y-4">
-    {/* Top controls row */}
-    <div
-      className="flex items-start justify-between gap-4"
-      style={{ width: rendererWidth }}
-    >
-      {/* Left controls */}
-      <div className="flex items-center gap-4 flex-wrap">
-        {/* Note + Rest duration buttons */}
-        <div>
-          <div className="text-xs text-gray-500 mb-1">Select to add note or rest</div>
-          <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden shadow-sm divide-x divide-gray-300">
-            {NOTE_DURATION_OPTIONS.map((option) => (
-              <button
-                key={`note-${option.duration}`}
-                title={option.title}
-                onClick={() => {
-                  setSelectedKind("note");
-                  setSelectedDuration(option.duration);
-                }}
-                className={`${durationButtonClass(option.duration, "note")} text-2xl w-10 h-10 flex items-center justify-center transition-colors`}
-              >
-                {option.label}
-              </button>
-            ))}
-            <div className="w-px bg-gray-400" />
-            {REST_DURATION_OPTIONS.map((option) => (
-              <button
-                key={`rest-${option.duration}`}
-                title={option.title}
-                onClick={() => {
-                  setSelectedKind("rest");
-                  setSelectedDuration(option.duration);
-                  setSelectedAccidental(null);
-                }}
-                className={`${durationButtonClass(option.duration, "rest")} text-2xl w-10 h-10 flex items-center justify-center transition-colors`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Accidental buttons */}
-        <div>
-          <div className="text-xs  text-gray-500 mb-1">Add accidentals</div>
-          <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden shadow-sm divide-x divide-gray-300">
-            {(["#", "b", "n"] as const).map((accidental) => (
-              <button
-                key={accidental}
-                onClick={() => handleAccidentalClick(accidental)}
-                className={`${
-                  selectedAccidental === accidental
-                    ? "bg-gray-800 text-white"
-                    : "bg-white text-gray-700 hover:bg-gray-100"
-                } text-xl w-10 h-10 flex items-center justify-center transition-colors`}
-              >
-                {accidental === "#" ? "♯" : accidental === "b" ? "♭" : "♮"}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Key signature dropdown */}
-        <div>
-          <div className="text-xs text-gray-500 mb-1">Key signature</div>
-          <select
-            value={keySignature}
-            onChange={(e) => handleKeySignatureChange(e.target.value)}
-            className="bg-gray-200 text-black border border-gray-500 rounded px-3 h-10"
-          >
-            <option value="C">C</option>
-            <option value="G">G / Em</option>
-            <option value="D">D / Bm</option>
-            <option value="A">A / F#m</option>
-            <option value="E">E / C#m</option>
-            <option value="B">B / G#m</option>
-            <option value="F">F / Dm</option>
-            <option value="Bb">Bb / Gm</option>
-            <option value="Eb">Eb / Cm</option>
-            <option value="Ab">Ab / Fm</option>
-          </select>
-        </div>
-
-        {/* Edit buttons */}
-        <div>
-          <div className="text-xs text-gray-500 mb-1 invisible">Edit</div>
-          <div className="flex gap-2">
-            <button
-              onClick={deleteLastNote}
-              className={deleteLastButtonClass()}
-            >
-              Delete Last
-            </button>
-
-            <button
-              onClick={clearAllMeasures}
-              className={clearAllButtonClass()}
-            >
-              Clear Melody Staff
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* BPM + Play */}
-      <div className="flex items-start justify-end gap-2 flex-wrap">
-        <div>
-          <div className="text-xs text-gray-500 mb-1">BPM</div>
-          <input
-            type="number"
-            min="40"
-            max="240"
-            value={bpm}
-            onChange={(e) => {
-              const nextBpm = Number(e.target.value);
-              if (!Number.isNaN(nextBpm)) setBpm(nextBpm);
-            }}
-            className="w-20 bg-gray-200 text-black border border-gray-500 rounded px-2 h-10"
-          />
-        </div>
-        <div>
-          <div className="text-xs text-gray-500 mb-1">New progression</div>
-          <button
-            onClick={generateChords}
-            disabled={isGenerating}
-            className={
-              isGenerating
-                ? "bg-gray-200 text-gray-500 border border-gray-300 rounded px-4 h-10 cursor-not-allowed"
-                : "bg-indigo-700 text-white border border-indigo-900 rounded px-4 h-10 hover:bg-indigo-600"
-            }
-          >
-            {isGenerating ? "Generating…" : "Generate"}
-          </button>
-        </div>
-        <div>
-          <div className="text-xs text-gray-500 mb-1">Mode</div>
-          <select
-            value={generationMode}
-            onChange={(e) =>
-              handleGenerationModeChange(e.target.value as GenerationMode)
-            }
-            className="bg-gray-200 text-black border border-gray-500 rounded px-3 h-10"
-          >
-            <option value="automatic">Automatic</option>
-            <option value="major">Major</option>
-            <option value="minor">Minor</option>
-          </select>
-        </div>
-        <div>
-          <div className="text-xs text-gray-500 mb-1">Style</div>
-          <select
-            value={chordStyle}
-            onChange={(e) => setChordStyle(e.target.value as StyleOption)}
-            className="bg-gray-200 text-black border border-gray-500 rounded px-3 h-10"
-          >
-            <option value="simple">Simple</option>
-            <option value="jazzy">Jazzy</option>
-            <option value="bluesy">Bluesy</option>
-            <option value="descendingBass">Descending bass</option>
-          </select>
-        </div>
-        <div className="flex flex-col items-end gap-2">
+  <div className="bg-white border rounded-lg p-4 shadow space-y-6">
+    {/* Section 1: melody + chord staves and all note-entry controls */}
+    <section className="space-y-4">
+      {/* Controls row */}
+      <div
+        className="flex items-start justify-between gap-4 flex-wrap"
+        style={{ maxWidth: rendererWidth }}
+      >
+        {/* Left controls */}
+        <div className="flex items-center gap-4 flex-wrap">
+          {/* Note + Rest duration buttons */}
           <div>
-            <div className="text-xs invisible mb-1">x</div>
-            <button
-              onClick={playMeasures}
-              className="bg-green-700 text-white border border-green-900 rounded px-4 h-10 hover:bg-green-600"
+            <div className="text-xs text-gray-500 mb-1">Select to add note or rest</div>
+            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden shadow-sm divide-x divide-gray-300">
+              {NOTE_DURATION_OPTIONS.map((option) => (
+                <button
+                  key={`note-${option.duration}`}
+                  title={option.title}
+                  onClick={() => {
+                    setSelectedKind("note");
+                    setSelectedDuration(option.duration);
+                  }}
+                  className={`${durationButtonClass(option.duration, "note")} text-2xl w-10 h-10 flex items-center justify-center transition-colors`}
+                >
+                  {option.label}
+                </button>
+              ))}
+              <div className="w-px bg-gray-400" />
+              {REST_DURATION_OPTIONS.map((option) => (
+                <button
+                  key={`rest-${option.duration}`}
+                  title={option.title}
+                  onClick={() => {
+                    setSelectedKind("rest");
+                    setSelectedDuration(option.duration);
+                    setSelectedAccidental(null);
+                  }}
+                  className={`${durationButtonClass(option.duration, "rest")} text-2xl w-10 h-10 flex items-center justify-center transition-colors`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Accidental buttons */}
+          <div>
+            <div className="text-xs  text-gray-500 mb-1">Add accidentals</div>
+            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden shadow-sm divide-x divide-gray-300">
+              {(["#", "b", "n"] as const).map((accidental) => (
+                <button
+                  key={accidental}
+                  onClick={() => handleAccidentalClick(accidental)}
+                  className={`${
+                    selectedAccidental === accidental
+                      ? "bg-gray-800 text-white"
+                      : "bg-white text-gray-700 hover:bg-gray-100"
+                  } text-xl w-10 h-10 flex items-center justify-center transition-colors`}
+                >
+                  {accidental === "#" ? "♯" : accidental === "b" ? "♭" : "♮"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Key signature dropdown */}
+          <div>
+            <div className="text-xs text-gray-500 mb-1">Key signature</div>
+            <select
+              value={keySignature}
+              onChange={(e) => handleKeySignatureChange(e.target.value)}
+              className="bg-gray-200 text-black border border-gray-500 rounded px-3 h-10"
             >
-              Play
+              <option value="C">C</option>
+              <option value="G">G / Em</option>
+              <option value="D">D / Bm</option>
+              <option value="A">A / F#m</option>
+              <option value="E">E / C#m</option>
+              <option value="B">B / G#m</option>
+              <option value="F">F / Dm</option>
+              <option value="Bb">Bb / Gm</option>
+              <option value="Eb">Eb / Cm</option>
+              <option value="Ab">Ab / Fm</option>
+            </select>
+          </div>
+
+          {/* Mode */}
+          <div>
+            <div className="text-xs text-gray-500 mb-1">Mode</div>
+            <select
+              value={generationMode}
+              onChange={(e) =>
+                handleGenerationModeChange(e.target.value as GenerationMode)
+              }
+              className="bg-gray-200 text-black border border-gray-500 rounded px-3 h-10"
+            >
+              <option value="automatic">Automatic</option>
+              <option value="major">Major</option>
+              <option value="minor">Minor</option>
+            </select>
+          </div>
+
+          {/* Edit buttons */}
+          <div>
+            <div className="text-xs text-gray-500 mb-1 invisible">Edit</div>
+            <div className="flex gap-2">
+              <button
+                onClick={deleteLastNote}
+                className={deleteLastButtonClass()}
+              >
+                Delete Last
+              </button>
+
+              <button
+                onClick={clearAllMeasures}
+                className={clearAllButtonClass()}
+              >
+                Clear Melody Staff
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* BPM + Play + Clear Chords */}
+        <div className="flex items-start justify-end gap-2 flex-wrap">
+          <div>
+            <div className="text-xs text-gray-500 mb-1">BPM</div>
+            <input
+              type="number"
+              min="40"
+              max="240"
+              value={bpm}
+              onChange={(e) => {
+                const nextBpm = Number(e.target.value);
+                if (!Number.isNaN(nextBpm)) setBpm(nextBpm);
+              }}
+              className="w-20 bg-gray-200 text-black border border-gray-500 rounded px-2 h-10"
+            />
+          </div>
+          <div className="flex flex-col items-end gap-2">
+            <div>
+              <div className="text-xs invisible mb-1">x</div>
+              <button
+                onClick={playMeasures}
+                className="bg-green-700 text-white border border-green-900 rounded px-4 h-10 hover:bg-green-600"
+              >
+                Play
+              </button>
+            </div>
+            <button
+              onClick={clearChords}
+              disabled={chordMeasures.every((measure) => measure.length === 0)}
+              className={clearChordsButtonClass()}
+            >
+              Clear Chords
             </button>
           </div>
-          <button
-            onClick={clearChords}
-            disabled={chordMeasures.every((measure) => measure.length === 0)}
-            className={clearChordsButtonClass()}
-          >
-            Clear Chords
-          </button>
         </div>
       </div>
-    </div>
 
-    {/* Natural-language style prompt (display-only for now) */}
-    <div className="space-y-2" style={{ width: rendererWidth }}>
-      <label className="flex flex-col gap-2 max-w-xl">
-        <span className="text-sm font-medium text-gray-700">
+      {/* Staff */}
+      <div className="overflow-x-auto">
+        <div
+          ref={staffWrapperRef}
+          onClick={handleStaffClick}
+          className="cursor-crosshair"
+          style={{
+            width: rendererWidth,
+            height: rendererHeight,
+            position: "relative",
+          }}
+        >
+          <div ref={containerRef} />
+        </div>
+      </div>
+    </section>
+
+    {/* Section 2: harmony prompt, generate/update, progression summary, explanation */}
+    <section className="space-y-3 border-t border-gray-200 pt-4 w-full max-w-3xl">
+      <label className="flex flex-col gap-1">
+        <span className="text-sm font-medium text-gray-800">
           Describe the harmony you want
         </span>
+        <span className="text-xs text-gray-500">{PROMPT_HELPER_TEXT}</span>
         <textarea
           value={stylePrompt}
           onChange={(event) => setStylePrompt(event.target.value)}
           maxLength={500}
           rows={3}
-          placeholder="Warm and jazzy with a descending bass and a satisfying ending"
-          className="rounded-md border border-gray-400 bg-white text-black px-3 py-2 text-sm"
+          placeholder={hasProgression ? REVISION_PLACEHOLDER : FRESH_PLACEHOLDER}
+          className="mt-1 rounded-md border border-gray-400 bg-white text-black px-3 py-2 text-sm"
         />
       </label>
 
-      <div className="flex items-center gap-3 flex-wrap">
-        <button
-          onClick={handleInterpretStyle}
-          disabled={isGenerating || stylePrompt.trim() === ""}
-          className={
-            isGenerating || stylePrompt.trim() === ""
-              ? "bg-gray-200 text-gray-500 border border-gray-300 rounded px-4 h-10 cursor-not-allowed"
-              : "bg-indigo-700 text-white border border-indigo-900 rounded px-4 h-10 hover:bg-indigo-600"
-          }
-        >
-          {isGenerating ? "Interpreting…" : "Interpret style"}
-        </button>
-
-        {aiInterpretation && (
-          <span className="text-sm text-gray-700">
-            Interpreted as: {describeInterpretation(aiInterpretation)}
-          </span>
-        )}
-      </div>
-
-      {aiInterpretation?.summary && (
-        <p className="text-xs text-gray-500 max-w-xl">
-          {aiInterpretation.summary}
-        </p>
-      )}
+      <button
+        onClick={handleGenerateProgression}
+        disabled={isGenerating}
+        className={
+          isGenerating
+            ? "bg-gray-200 text-gray-500 border border-gray-300 rounded px-4 h-10 cursor-not-allowed"
+            : "bg-indigo-700 text-white border border-indigo-900 rounded px-4 h-10 hover:bg-indigo-600"
+        }
+      >
+        {isGenerating
+          ? hasProgression
+            ? "Updating…"
+            : "Generating…"
+          : hasProgression
+            ? "Update progression"
+            : "Generate progression"}
+      </button>
 
       {aiError && <p className="text-xs text-amber-700">{aiError}</p>}
-    </div>
 
-    <p className="text-sm text-gray-700">{progressionInfo}</p>
+      {hasProgression && (
+        <p className="text-sm text-gray-700">{progressionInfo}</p>
+      )}
 
-    {chordExplanations.length > 0 && (
-      <div
-        className="border border-gray-300 bg-gray-50 rounded p-3 text-sm text-gray-800 space-y-3"
-        style={{ width: rendererWidth }}
-      >
-        <div className="font-semibold text-gray-900">Why these chords?</div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {chordExplanations.map((explanation) => (
-            <div
-              key={`${explanation.measureNumber}-${explanation.symbol}`}
-              className="bg-white border border-gray-200 rounded p-3"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="font-semibold">
-                  Measure {explanation.measureNumber}: {explanation.symbol}
-                </div>
-                {explanation.score !== undefined && (
-                  <div className="text-xs text-gray-500">
-                    Score {Math.round(explanation.score)}
-                  </div>
-                )}
-              </div>
-              <ul className="list-disc pl-5 mt-2 space-y-1 text-gray-700">
-                {explanation.reasons.map((reason, reasonIndex) => (
-                  <li key={`${reason}-${reasonIndex}`}>{reason}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
+      {(isExplaining || aiExplanation || aiExplainError) && (
+        <div className="border border-gray-200 bg-gray-50 rounded p-3 text-sm space-y-2">
+          <div className="font-semibold text-gray-900">In plain English</div>
+
+          {isExplaining && (
+            <p className="text-gray-500">
+              Writing a plain-English explanation…
+            </p>
+          )}
+
+          {aiExplainError && (
+            <p className="text-xs text-amber-700">{aiExplainError}</p>
+          )}
+
+          {aiExplanation?.overview && (
+            <p className="text-gray-700">{aiExplanation.overview}</p>
+          )}
+
+          {visibleExplanationMeasures.length > 0 && (
+            <ul className="space-y-1 text-gray-700">
+              {visibleExplanationMeasures.map((measure) => (
+                <li key={`ai-explanation-${measure.measure}`}>
+                  <span className="font-medium">
+                    Measure {measure.measure} ({measure.chord}):
+                  </span>{" "}
+                  {measure.explanation}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-      </div>
-    )}
-
-    {/* Staff */}
-    <div
-      ref={staffWrapperRef}
-      onClick={handleStaffClick}
-      className="cursor-crosshair"
-      style={{
-        width: rendererWidth,
-        height: rendererHeight,
-        position: "relative",
-      }}
-    >
-      <div ref={containerRef} />
-    </div>
+      )}
+    </section>
   </div>
 );
 }

@@ -77,6 +77,26 @@ export type GenerationPreferences = {
   preferSuspensions: boolean;
 };
 
+// Identity of one chord in the progression being revised. Used to reward the
+// engine for staying close to the user's current progression.
+export type RevisionChordTarget = {
+  degree: number;
+  rootPc: number;
+  quality: ChordQuality;
+  bassPc: number;
+  inversion?: number;
+};
+
+export type RevisionContext = {
+  // Previous progression's chord identities, indexed by measure.
+  targets: (RevisionChordTarget | undefined)[];
+  preserveOverallProgression: boolean;
+  // 1-based measure numbers to keep fixed.
+  preserveChordPositions: number[];
+  // 0 = keep almost everything, 1 = free to change a lot.
+  changeAmount: number;
+};
+
 export type ChordScoreContext = {
   key: KeyContext;
   style: StyleOption;
@@ -86,6 +106,14 @@ export type ChordScoreContext = {
   // Present only on the AI-interpreted path. When undefined, scoring behaves
   // exactly as the dropdown-only engine always has.
   preferences?: GenerationPreferences;
+  // Revision similarity scoring. All undefined on a fresh (non-revision)
+  // generation, leaving scoring unchanged.
+  revision?: {
+    preserveOverallProgression: boolean;
+    changeAmount: number;
+  };
+  revisionTarget?: RevisionChordTarget;
+  revisionLocked?: boolean;
 };
 
 export type TimeSignature = {
