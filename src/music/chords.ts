@@ -508,10 +508,6 @@ export function buildNamedChord(
   const parsed = parseNamedChord(chordName);
   if (!parsed) return null;
 
-  if (process.env.NODE_ENV === "development") {
-    console.debug("parsedChordName", { chordName, parsed, activeKey: key.label });
-  }
-
   const triadQuality: "major" | "minor" | "dim" =
     parsed.quality === "minor"
       ? "minor"
@@ -540,15 +536,6 @@ export function buildNamedChord(
     (offset) => mod12(key.tonicPc + offset) === parsed.rootPc
   );
   const degree = degreeIndex === -1 ? 0 : degreeIndex + 1;
-
-  if (process.env.NODE_ENV === "development") {
-    console.debug("romanNumeralCalculation", {
-      chordName,
-      activeKey: key.label,
-      degree,
-      romanNumeral: romanBase,
-    });
-  }
 
   if (parsed.extension !== 7) {
     const noteNames = [rootName, thirdName, fifthName];

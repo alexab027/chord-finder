@@ -86,6 +86,7 @@ Rules:
 - Map simple / pop / clean / basic language toward "simple".
 - Map jazz / lush / sophisticated / colorful language toward "jazzy".
 - Map blues / gritty / dominant-seventh language toward "bluesy".
+- For explicit "descending bass", "descending bass line", or "descending bassline" requests, set "descendingBassWeight" to 1.0.
 - Increase "descendingBassWeight" for falling, walking-down, or descending bass requests.
 - Lower "dissonanceTolerance" for safe, smooth, or consonant requests.
 - Raise "dissonanceTolerance" for tense, surprising, or experimental requests.
@@ -222,6 +223,10 @@ function asksForModeChange(prompt: string) {
   );
 }
 
+function asksForExplicitDescendingBass(prompt: string) {
+  return /\bdescending\s+bass(?:\s*line|line)?\b/i.test(prompt);
+}
+
 function unsupportedActionTypes(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
 
@@ -276,23 +281,6 @@ function extractExplicitCopyActions(prompt: string): ChordEditAction[] {
   return actions;
 }
 
-// Kept temporarily while router logs compare old and strict replacement parsing.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function extractLiteralReplaceActions(prompt: string): ChordEditAction[] {
-  const actions: ChordEditAction[] = [];
-  const pattern =
-    /\b(?:replace|set|make)\s+chord\s+([1-4])\s+(?:with|to)\s+([A-Ga-g][#b]?(?:maj|min|m|dim|o|°|dom)?7?)\b/g;
-
-  for (const match of prompt.matchAll(pattern)) {
-    actions.push({
-      type: "replace_chord",
-      measure: Number(match[1]),
-      chordName: match[2],
-    });
-  }
-
-  return actions;
-}
 
 function extractValidatedReplaceActions(prompt: string): ChordEditAction[] {
   const actions: ChordEditAction[] = [];
@@ -339,6 +327,10 @@ function validateExplicitReplacementSyntax(prompt: string): string | null {
   return null;
 }
 
+function normalizeChordName(chordName: string) {
+  return chordName.trim().replace(/[.,!?;:]+$/, "").toLowerCase();
+}
+
 function mergeLiteralReplaceActions(
   actions: ChordEditAction[],
   literalReplaceActions: ChordEditAction[],
@@ -348,12 +340,20 @@ function mergeLiteralReplaceActions(
   return [
     ...actions.filter(
       (action) =>
-        action.type !== "set_chord" ||
-        !literalReplaceActions.some(
-          (literal) =>
-            literal.type === "replace_chord" &&
-            literal.measure === action.measure,
-        ),
+        !literalReplaceActions.some((literal) => {
+          if (literal.type !== "replace_chord") return false;
+          if (action.type === "set_chord") {
+            return literal.measure === action.measure;
+          }
+          if (action.type === "replace_chord") {
+            return (
+              literal.measure === action.measure &&
+              normalizeChordName(literal.chordName) ===
+                normalizeChordName(action.chordName)
+            );
+          }
+          return false;
+        }),
     ),
     ...literalReplaceActions,
   ];
@@ -433,10 +433,6 @@ function isIntInRange(
 function sanitizeActions(value: unknown): ChordEditAction[] {
   if (!Array.isArray(value)) return [];
 
-  if (process.env.NODE_ENV === "development") {
-    console.debug("rawRouterActions", value);
-  }
-
   const actions: ChordEditAction[] = [];
 
   for (const raw of value.slice(0, MAX_ACTIONS)) {
@@ -493,10 +489,6 @@ function sanitizeActions(value: unknown): ChordEditAction[] {
       });
     }
     // Unknown action types are ignored.
-  }
-
-  if (process.env.NODE_ENV === "development") {
-    console.debug("parsedRouterActions", actions);
   }
 
   return actions;
@@ -582,11 +574,6 @@ function sanitizeInterpretation(raw: unknown): InterpretedStyle {
 }
 
 function json(body: HarmonyRouterResponse, status = 200): Response {
-  if (process.env.NODE_ENV === "development") {
-    console.debug("parsedRouterResponse", body);
-    console.debug("parsedRouterResponse.intent", body.intent);
-  }
-
   return Response.json(body, { status });
 }
 
@@ -755,10 +742,6 @@ export async function POST(request: Request): Promise<Response> {
       });
     }
 
-    if (process.env.NODE_ENV === "development") {
-      console.debug("rawRouterResponse", content);
-    }
-
     let parsed: {
       intent?: unknown;
       confidence?: unknown;
@@ -782,6 +765,9 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const interpretation = sanitizeInterpretation(parsed);
+    if (asksForExplicitDescendingBass(prompt)) {
+      interpretation.descendingBassWeight = 1;
+    }
     const unsupportedActions = unsupportedActionTypes(parsed.actions);
     if (unsupportedActions.length > 0) {
       return json({
@@ -800,9 +786,6 @@ export async function POST(request: Request): Promise<Response> {
       ),
       extractExplicitCopyActions(prompt),
     );
-    if (process.env.NODE_ENV === "development") {
-      console.debug("finalRouterActions", actions);
-    }
     const intent = asIntent(parsed.intent);
     const confidence = clamp01(parsed.confidence, 0.5);
 

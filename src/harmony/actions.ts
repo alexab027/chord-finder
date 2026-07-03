@@ -178,24 +178,11 @@ export function applyChordEdit(
 
       assertValidMeasure(progression, measure, "target");
 
-      if (process.env.NODE_ENV === "development") {
-        console.debug("replaceChordAction", action);
-      }
-
       const candidate = buildNamedChord(context.key, chordName);
       if (!candidate) {
         throw new HarmonyActionError(
           `replace_chord: could not parse chord "${chordName}".`
         );
-      }
-
-      if (process.env.NODE_ENV === "development") {
-        console.debug("replaceChordCandidate", {
-          chordName,
-          activeKey: context.key.label,
-          romanNumeral: candidate.name,
-          noteNames: candidate.noteNames,
-        });
       }
 
       const at = measure - 1;

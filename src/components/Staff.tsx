@@ -19,6 +19,7 @@ import {
   DURATION_TO_SLOTS,
   getKeySignatureExtraWidth,
   KEY_SIGNATURE_ACCIDENTALS,
+  parsePitchToMidi,
   PITCHES_TOP_TO_BOTTOM,
 } from "../music/noteUtils";
 import { voiceProgression } from "../music/voicing";
@@ -57,6 +58,7 @@ type AiProgressionExplanation = {
 };
 
 type ExplanationRequest = {
+  activeKey: string;
   key: string;
   styleRequest: string;
   styleSummary: string;
@@ -83,6 +85,55 @@ const FRESH_PLACEHOLDER =
 
 const REVISION_PLACEHOLDER =
   "Example: Keep this progression but make it slightly more complex";
+
+function asksForExplicitDescendingBass(prompt: string) {
+  return /\bdescending\s+bass(?:\s*line|line)?\b/i.test(prompt);
+}
+
+function getEffectiveStyle(
+  prompt: string,
+  fallbackStyle: StyleOption,
+): StyleOption {
+  return asksForExplicitDescendingBass(prompt)
+    ? "descendingBass"
+    : fallbackStyle;
+}
+
+function getVoicedBassMidiSequence(voicedProgression: PlacedChord[][]) {
+  return voicedProgression.map((measure) => {
+    const bassPitch = measure[0]?.pitches[0];
+    return bassPitch ? (parsePitchToMidi(bassPitch) ?? null) : null;
+  });
+}
+
+function reasonClaimsDescendingBass(reason: string) {
+  return /\b(descending bass|bass line|bassline|bass downward|stepwise bass motion)\b/i.test(
+    reason,
+  );
+}
+
+function getGroundedExplanationReasons(
+  scoredChord: ScoredChord,
+  measureIndex: number,
+  bassMidiSequence: Array<number | null>,
+) {
+  const currentBass = bassMidiSequence[measureIndex];
+  const previousBass =
+    measureIndex > 0 ? bassMidiSequence[measureIndex - 1] : null;
+  const bassDescends =
+    currentBass !== null && previousBass !== null && currentBass < previousBass;
+  const reasons = scoredChord.reasons.filter(
+    (reason) => bassDescends || !reasonClaimsDescendingBass(reason),
+  );
+
+  if (bassDescends) {
+    reasons.push(
+      `The final voiced bass moves downward from MIDI ${previousBass} to ${currentBass}.`,
+    );
+  }
+
+  return reasons;
+}
 
 function clampPref(value: number) {
   return Math.min(1, Math.max(0, value));
@@ -467,8 +518,6 @@ export default function Staff() {
     const pitch = yToPitch(clickY);
     const durationSlots = DURATION_TO_SLOTS[selectedDuration];
 
-    console.log("clickY:", clickY, "pitch:", pitch);
-
     setMeasures((prevMeasures) => {
       const newMeasures = prevMeasures.map((measure) => [...measure]);
 
@@ -477,7 +526,6 @@ export default function Staff() {
       const nextSlot = getNextAvailableSlot(measureNotes);
 
       if (nextSlot + durationSlots > 8) {
-        console.log("Note does not fit in this measure.");
         return prevMeasures;
       }
 
@@ -576,24 +624,7 @@ export default function Staff() {
           pendingClarification,
         }),
       });
-      const rawRouterResponse = await response.text();
-      if (process.env.NODE_ENV === "development") {
-        console.debug("rawRouterResponse", rawRouterResponse);
-      }
-
-      const parsedRouterResponse = JSON.parse(
-        rawRouterResponse,
-      ) as HarmonyRouterResponse;
-      if (process.env.NODE_ENV === "development") {
-        console.debug("parsedRouterResponse", parsedRouterResponse);
-        console.debug(
-          "parsedRouterResponse.intent",
-          parsedRouterResponse.intent,
-        );
-        console.debug("pendingClarification", pendingClarification);
-      }
-
-      return parsedRouterResponse;
+      return (await response.json()) as HarmonyRouterResponse;
     } catch {
       return null;
     }
@@ -631,13 +662,17 @@ export default function Staff() {
 
   function buildExplanationRequest(
     finalProgression: ScoredChord[],
+    voicedProgression: PlacedChord[][],
     keyLabel: string,
     styleRequest: string,
     styleSummary: string,
   ): ExplanationRequest | null {
     if (finalProgression.length === 0) return null;
 
+    const bassMidiSequence = getVoicedBassMidiSequence(voicedProgression);
+
     return {
+      activeKey: keyLabel,
       key: keyLabel,
       styleRequest,
       styleSummary,
@@ -646,7 +681,11 @@ export default function Staff() {
         symbol: scoredChord.chord.name,
         romanNumeral: scoredChord.chord.name,
         score: scoredChord.score,
-        reasons: scoredChord.reasons,
+        reasons: getGroundedExplanationReasons(
+          scoredChord,
+          index,
+          bassMidiSequence,
+        ),
       })),
     };
   }
@@ -658,19 +697,19 @@ export default function Staff() {
     label: "Generated" | "Updated",
   ) {
     lastProgressionRef.current = finalProgression;
-    setChordMeasures(
-      voiceProgression(
-        finalProgression,
-        measures,
-        getRenderedPitch,
-        effectiveStyle,
-      ),
+    const voicedProgression = voiceProgression(
+      finalProgression,
+      measures,
+      getRenderedPitch,
+      effectiveStyle,
     );
+    setChordMeasures(voicedProgression);
     setProgressionInfo(
       `${label} in ${keyLabel}: ${finalProgression
         .map((scoredChord) => scoredChord.chord.name)
         .join(" - ")}`,
     );
+    return voicedProgression;
   }
 
   function applyRequestedActions(
@@ -698,7 +737,10 @@ export default function Staff() {
     normalizedPrompt: string,
     data?: HarmonyRouterResponse,
   ): ExplanationRequest | null {
-    const effectiveStyle = data?.primaryStyle ?? BLANK_PROMPT_STYLE;
+    const effectiveStyle = getEffectiveStyle(
+      normalizedPrompt,
+      data?.primaryStyle ?? BLANK_PROMPT_STYLE,
+    );
     const preferences = data ? toGenerationPreferences(data) : undefined;
     const styleSummary = data?.summary ?? "";
     const requestedActions = data?.actions ?? [];
@@ -729,7 +771,7 @@ export default function Staff() {
       generatedKey,
     );
 
-    renderProgression(
+    const voicedProgression = renderProgression(
       finalProgression,
       generatedKey.label,
       effectiveStyle,
@@ -740,6 +782,7 @@ export default function Staff() {
 
     return buildExplanationRequest(
       finalProgression,
+      voicedProgression,
       generatedKey.label,
       normalizedPrompt,
       styleSummary,
@@ -767,15 +810,17 @@ export default function Staff() {
     const requestedActions = data.actions ?? [];
 
     if (requestedActions.length > 0) {
-      const effectiveStyle =
-        aiInterpretation?.primaryStyle ?? BLANK_PROMPT_STYLE;
+      const effectiveStyle = getEffectiveStyle(
+        normalizedPrompt,
+        aiInterpretation?.primaryStyle ?? BLANK_PROMPT_STYLE,
+      );
       const finalProgression = applyRequestedActions(
         previousProgression,
         requestedActions,
         generatedKey,
       );
 
-      renderProgression(
+      const voicedProgression = renderProgression(
         finalProgression,
         generatedKey.label,
         effectiveStyle,
@@ -786,6 +831,7 @@ export default function Staff() {
 
       return buildExplanationRequest(
         finalProgression,
+        voicedProgression,
         generatedKey.label,
         normalizedPrompt,
         aiInterpretation?.summary ?? "",
@@ -803,7 +849,17 @@ export default function Staff() {
       toGenerationPreferences(baseInterpretation),
       revisionIntent.requestedChanges,
     );
-    const effectiveStyle = baseInterpretation.primaryStyle;
+    const effectiveStyle = getEffectiveStyle(
+      normalizedPrompt,
+      baseInterpretation.primaryStyle,
+    );
+    const effectivePreferences: GenerationPreferences = {
+      ...applied,
+      style: effectiveStyle,
+      descendingBassWeight: asksForExplicitDescendingBass(normalizedPrompt)
+        ? 1
+        : applied.descendingBassWeight,
+    };
     const revision: RevisionContext = {
       targets: previousProgression.map((scoredChord) => ({
         degree: scoredChord.chord.degree,
@@ -819,12 +875,12 @@ export default function Staff() {
     const appliedInterpretation: InterpretedStyle = {
       ...baseInterpretation,
       primaryStyle: effectiveStyle,
-      descendingBassWeight: applied.descendingBassWeight,
-      complexity: applied.complexity,
-      dissonanceTolerance: applied.dissonanceTolerance,
-      cadenceStrength: applied.cadenceStrength,
-      preferSevenths: applied.preferSevenths,
-      preferSuspensions: applied.preferSuspensions,
+      descendingBassWeight: effectivePreferences.descendingBassWeight,
+      complexity: effectivePreferences.complexity,
+      dissonanceTolerance: effectivePreferences.dissonanceTolerance,
+      cadenceStrength: effectivePreferences.cadenceStrength,
+      preferSevenths: effectivePreferences.preferSevenths,
+      preferSuspensions: effectivePreferences.preferSuspensions,
       summary: data.summary || baseInterpretation.summary,
     };
     setAiInterpretation(appliedInterpretation);
@@ -834,7 +890,7 @@ export default function Staff() {
       measures,
       getRenderedPitch,
       effectiveStyle,
-      applied,
+      effectivePreferences,
       revision,
     );
     const finalProgression = applyRequestedActions(
@@ -843,7 +899,7 @@ export default function Staff() {
       generatedKey,
     );
 
-    renderProgression(
+    const voicedProgression = renderProgression(
       finalProgression,
       generatedKey.label,
       effectiveStyle,
@@ -854,6 +910,7 @@ export default function Staff() {
 
     return buildExplanationRequest(
       finalProgression,
+      voicedProgression,
       generatedKey.label,
       normalizedPrompt,
       appliedInterpretation.summary,
@@ -941,33 +998,21 @@ export default function Staff() {
 
       switch (data.intent) {
         case "generate_new":
-          if (process.env.NODE_ENV === "development") {
-            console.debug("harmonyRouterBranch", "generate_new");
-          }
           explanationContext = handleGenerateNewProgression(
             normalizedPrompt,
             data,
           );
           break;
         case "revise_existing":
-          if (process.env.NODE_ENV === "development") {
-            console.debug("harmonyRouterBranch", "revise_existing");
-          }
           explanationContext = handleReviseExistingProgression(
             normalizedPrompt,
             data,
           );
           break;
         case "clarify":
-          if (process.env.NODE_ENV === "development") {
-            console.debug("harmonyRouterBranch", "clarify");
-          }
           handleClarification(data, normalizedPrompt);
           break;
         case "answer_question":
-          if (process.env.NODE_ENV === "development") {
-            console.debug("harmonyRouterBranch", "answer_question");
-          }
           handleAnswerQuestion(data);
           break;
       }
