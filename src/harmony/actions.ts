@@ -1,5 +1,6 @@
 import type { KeyContext, ScoredChord } from "../music/types";
 import {
+  buildNamedChord,
   buildRequestedChord,
   type RequestedChordQuality,
 } from "../music/chords";
@@ -28,6 +29,11 @@ export type ChordEditAction =
       degree: number; // 1-7 scale degree
       quality: HarmonyChordQuality;
       extension?: 7;
+    }
+  | {
+      type: "replace_chord";
+      measure: number; // one-based target measure
+      chordName: string;
     };
 
 // Context the resolver needs. copy_chord ignores it; set_chord uses the key to
@@ -164,6 +170,43 @@ export function applyChordEdit(
 
       const next = progression.slice();
       next[at] = set;
+      return next;
+    }
+
+    case "replace_chord": {
+      const { measure, chordName } = action;
+
+      assertValidMeasure(progression, measure, "target");
+
+      if (process.env.NODE_ENV === "development") {
+        console.debug("replaceChordAction", action);
+      }
+
+      const candidate = buildNamedChord(context.key, chordName);
+      if (!candidate) {
+        throw new HarmonyActionError(
+          `replace_chord: could not parse chord "${chordName}".`
+        );
+      }
+
+      if (process.env.NODE_ENV === "development") {
+        console.debug("replaceChordCandidate", {
+          chordName,
+          activeKey: context.key.label,
+          romanNumeral: candidate.name,
+          noteNames: candidate.noteNames,
+        });
+      }
+
+      const at = measure - 1;
+      const replaced: ScoredChord = {
+        chord: candidate,
+        score: progression[at].score,
+        reasons: [`Set to ${candidate.name} (${chordName}) by request`],
+      };
+
+      const next = progression.slice();
+      next[at] = replaced;
       return next;
     }
 

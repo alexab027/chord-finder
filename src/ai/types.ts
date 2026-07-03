@@ -1,4 +1,17 @@
 import type { StyleOption } from "@/src/music/types";
+import type { ChordEditAction } from "@/src/harmony/actions";
+
+export type HarmonyIntent =
+  | "generate_new"
+  | "revise_existing"
+  | "clarify"
+  | "answer_question";
+
+export type PendingClarification = {
+  originalMessage: string;
+  question: string;
+  possibleIntents?: string[];
+};
 
 export type InterpretedStyle = {
   primaryStyle: StyleOption;
@@ -57,4 +70,14 @@ export const DEFAULT_REVISION_INTENT: RevisionIntent = {
   preserveChordPositions: [],
   changeAmount: 0.3,
   requestedChanges: {},
+};
+
+export type HarmonyRouterResponse = InterpretedStyle & {
+  intent: HarmonyIntent;
+  confidence: number;
+  warning?: string;
+  revision?: RevisionIntent;
+  actions?: ChordEditAction[];
+  clarificationQuestion?: string;
+  assistantMessage?: string;
 };

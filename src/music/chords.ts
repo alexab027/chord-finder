@@ -10,6 +10,8 @@ import {
   mod12,
   NOTE_LABELS,
   NOTE_LETTERS,
+  NOTE_TO_PC,
+  PC_TO_NOTE_SHARP,
   SCALE_OFFSETS,
   spellPitchClassForLetter,
 } from "./noteUtils";
@@ -421,6 +423,213 @@ export function buildRequestedChord(
     quality: engineQuality,
     keyFit: "diatonic",
   };
+}
+
+function getRomanForAbsoluteChord(
+  key: KeyContext,
+  degreeIndex: number,
+  rootPc: number,
+  quality: RequestedChordQuality
+) {
+  if (degreeIndex === -1) return NOTE_LABELS[PC_TO_NOTE_SHARP[rootPc]];
+
+  const cleanRomanBase = ROMAN_NUMERALS[key.mode][degreeIndex]
+    .replace(/\s*dim$/, "")
+    .replace(/\u00b0/g, "");
+
+  if (quality === "minor") return cleanRomanBase.toLowerCase();
+  if (quality === "diminished") return `${cleanRomanBase.toLowerCase()}\u00b0`;
+  return cleanRomanBase.toUpperCase();
+
+  /*
+  if (quality === "minor") {
+    return ROMAN_NUMERALS[key.mode][degreeIndex]
+      .replace(" dim", "")
+      .replace("Â°", "")
+      .toLowerCase();
+  }
+
+  if (quality === "diminished") {
+    return `${ROMAN_NUMERALS[key.mode][degreeIndex]
+      .replace(" dim", "")
+      .replace("Â°", "")
+      .toLowerCase()} dim`;
+  }
+
+  return ROMAN_NUMERALS[key.mode][degreeIndex]
+    .replace(" dim", "")
+    .replace("Â°", "")
+    .toUpperCase();
+  */
+}
+
+function parseNamedChord(chordName: string):
+  | {
+      rootName: string;
+      rootPc: number;
+      quality: RequestedChordQuality;
+      extension?: 7;
+    }
+  | null {
+  const normalized = chordName.trim().replace(/\s+/g, "");
+  const match = /^([A-Ga-g])([#b]?)(maj|min|m|dim|o|°|dom)?(7)?$/.exec(
+    normalized
+  );
+  if (!match) return null;
+
+  const rootName = `${match[1].toLowerCase()}${match[2] ?? ""}`;
+  const rootPc = NOTE_TO_PC[rootName];
+  if (rootPc === undefined) return null;
+
+  const rawQuality = match[3]?.toLowerCase();
+  const quality: RequestedChordQuality =
+    rawQuality === "m" || rawQuality === "min"
+      ? "minor"
+      : rawQuality === "dim" || rawQuality === "o" || rawQuality === "°"
+        ? "diminished"
+        : rawQuality === "dom"
+          ? "dominant"
+          : match[4] === "7"
+            ? "dominant"
+            : "major";
+
+  return {
+    rootName,
+    rootPc,
+    quality,
+    ...(match[4] === "7" ? { extension: 7 as const } : {}),
+  };
+}
+
+export function buildNamedChord(
+  key: KeyContext,
+  chordName: string
+): ChordCandidate | null {
+  const parsed = parseNamedChord(chordName);
+  if (!parsed) return null;
+
+  if (process.env.NODE_ENV === "development") {
+    console.debug("parsedChordName", { chordName, parsed, activeKey: key.label });
+  }
+
+  const triadQuality: "major" | "minor" | "dim" =
+    parsed.quality === "minor"
+      ? "minor"
+      : parsed.quality === "diminished"
+        ? "dim"
+        : "major";
+  const triadPcs = getTriadPcs(parsed.rootPc, triadQuality);
+  const rootName = spellPitchClassForLetter(triadPcs[0], parsed.rootName[0]);
+  const thirdName = spellPitchClassForLetter(
+    triadPcs[1],
+    getScaleLetter(rootName, 2)
+  );
+  const fifthName = spellPitchClassForLetter(
+    triadPcs[2],
+    getScaleLetter(rootName, 4)
+  );
+  const romanBase = getRomanForAbsoluteChord(
+    key,
+    SCALE_OFFSETS[key.mode].findIndex(
+      (offset) => mod12(key.tonicPc + offset) === parsed.rootPc
+    ),
+    parsed.rootPc,
+    parsed.quality
+  );
+  const degreeIndex = SCALE_OFFSETS[key.mode].findIndex(
+    (offset) => mod12(key.tonicPc + offset) === parsed.rootPc
+  );
+  const degree = degreeIndex === -1 ? 0 : degreeIndex + 1;
+
+  if (process.env.NODE_ENV === "development") {
+    console.debug("romanNumeralCalculation", {
+      chordName,
+      activeKey: key.label,
+      degree,
+      romanNumeral: romanBase,
+    });
+  }
+
+  if (parsed.extension !== 7) {
+    const noteNames = [rootName, thirdName, fifthName];
+    return {
+      degree,
+      name: romanBase,
+      rootPc: triadPcs[0],
+      bassPc: triadPcs[0],
+      pcs: triadPcs,
+      noteNames,
+      pitches: getCloseChordVoicingPitches(
+        triadPcs[0],
+        triadPcs[1],
+        triadPcs[2],
+        noteNames
+      ),
+      quality: "triad",
+      keyFit: "unrelated",
+    };
+  }
+
+  const seventhInterval = parsed.quality === "major" ? 11 : 10;
+  const engineQuality: "maj7" | "min7" | "dom7" =
+    parsed.quality === "major"
+      ? "maj7"
+      : parsed.quality === "dominant"
+        ? "dom7"
+        : "min7";
+  const seventhPc = mod12(triadPcs[0] + seventhInterval);
+  const seventhName = spellPitchClassForLetter(
+    seventhPc,
+    getScaleLetter(rootName, 6)
+  );
+  const pcs = [...triadPcs, seventhPc];
+  const noteNames = [rootName, thirdName, fifthName, seventhName];
+
+  return {
+    degree,
+    name: `${romanBase}${engineQuality}`,
+    rootPc: pcs[0],
+    bassPc: pcs[0],
+    pcs,
+    noteNames,
+    pitches: getCloseChordVoicingForPcs(pcs, noteNames),
+    quality: engineQuality,
+    keyFit: "unrelated",
+  };
+}
+
+function assertCmajorNamedChordMappings() {
+  const cMajor: KeyContext = {
+    signature: "C",
+    label: "C major",
+    tonicName: "c",
+    tonicPc: 0,
+    mode: "major",
+  };
+  const expected: Record<string, string> = {
+    C: "I",
+    Dm: "ii",
+    Dm7: "iimin7",
+    Em: "iii",
+    F: "IV",
+    G: "V",
+    G7: "Vdom7",
+    Am: "vi",
+    Bdim: "vii\u00b0",
+  };
+
+  for (const [chordName, romanNumeral] of Object.entries(expected)) {
+    const candidate = buildNamedChord(cMajor, chordName);
+    if (candidate?.name !== romanNumeral) {
+      throw new Error(
+        `Named chord mapping failed: ${chordName} expected ${romanNumeral}, got ${candidate?.name ?? "null"}`
+      );
+    }
+  }
+}
+
+if (process.env.NODE_ENV === "development") {
+  assertCmajorNamedChordMappings();
 }
 
 export function buildKeyChords(key: KeyContext): ChordCandidate[] {
