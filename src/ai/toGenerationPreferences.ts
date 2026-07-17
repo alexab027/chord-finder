@@ -6,11 +6,15 @@ export function toGenerationPreferences(
 ): GenerationPreferences {
   return {
     style: interpretation.primaryStyle,
+    melodyFitPriority: interpretation.melodyFitPriority,
+    consonancePriority: interpretation.consonancePriority,
     descendingBassWeight: interpretation.descendingBassWeight,
     complexity: interpretation.complexity,
     dissonanceTolerance: interpretation.dissonanceTolerance,
     cadenceStrength: interpretation.cadenceStrength,
     preferSevenths: interpretation.preferSevenths,
     preferSuspensions: interpretation.preferSuspensions,
+    voiceLeadingPriority: interpretation.voiceLeadingPriority,
+    playabilityRequired: interpretation.playabilityRequired,
   };
 }

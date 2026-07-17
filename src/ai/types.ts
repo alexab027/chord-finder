@@ -1,5 +1,9 @@
 import type { StyleOption } from "@/src/music/types";
 import type { ChordEditAction } from "@/src/harmony/actions";
+import {
+  DEFAULT_HARMONY_PROFILE,
+  DEFAULT_HARMONY_SUMMARY,
+} from "@/src/harmony/preferences";
 
 export type HarmonyIntent =
   | "generate_new"
@@ -15,26 +19,34 @@ export type PendingClarification = {
 
 export type InterpretedStyle = {
   primaryStyle: StyleOption;
+  melodyFitPriority: number;
+  consonancePriority: number;
   descendingBassWeight: number;
   complexity: number;
   dissonanceTolerance: number;
   cadenceStrength: number;
   preferSevenths: boolean;
   preferSuspensions: boolean;
+  voiceLeadingPriority: number;
+  playabilityRequired: boolean;
   mood: string[];
   summary: string;
 };
 
 export const DEFAULT_INTERPRETED_STYLE: InterpretedStyle = {
-  primaryStyle: "simple",
-  descendingBassWeight: 0,
-  complexity: 0.25,
-  dissonanceTolerance: 0.2,
-  cadenceStrength: 0.7,
-  preferSevenths: false,
-  preferSuspensions: false,
+  primaryStyle: DEFAULT_HARMONY_PROFILE.style,
+  melodyFitPriority: DEFAULT_HARMONY_PROFILE.melodyFitPriority,
+  consonancePriority: DEFAULT_HARMONY_PROFILE.consonancePriority,
+  descendingBassWeight: DEFAULT_HARMONY_PROFILE.descendingBassWeight,
+  complexity: DEFAULT_HARMONY_PROFILE.complexity,
+  dissonanceTolerance: DEFAULT_HARMONY_PROFILE.dissonanceTolerance,
+  cadenceStrength: DEFAULT_HARMONY_PROFILE.cadenceStrength,
+  preferSevenths: DEFAULT_HARMONY_PROFILE.preferSevenths,
+  preferSuspensions: DEFAULT_HARMONY_PROFILE.preferSuspensions,
+  voiceLeadingPriority: DEFAULT_HARMONY_PROFILE.voiceLeadingPriority,
+  playabilityRequired: DEFAULT_HARMONY_PROFILE.playabilityRequired,
   mood: [],
-  summary: "Use a clear, consonant progression with a strong resolution.",
+  summary: DEFAULT_HARMONY_SUMMARY,
 };
 
 // Mirrors the StyleOption union so the server route can validate the model's

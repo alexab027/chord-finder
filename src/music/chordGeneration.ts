@@ -120,6 +120,8 @@ function getBestScoredChordForMeasure(
     key: KeyContext;
     style: StyleOption;
     measureNotes: PlacedNote[];
+    measureIndex: number;
+    measureCount: number;
     getRenderedPitchFn: (note: PlacedNote) => string;
     previousChord?: ChordCandidate;
     previousBassMidi?: number;
@@ -212,6 +214,8 @@ function scoreChordPath(
       key,
       style,
       measureNotes,
+      measureIndex,
+      measureCount: measures.length,
       getRenderedPitchFn,
       previousChord,
       previousBassMidi,

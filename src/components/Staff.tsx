@@ -29,6 +29,7 @@ import {
   HarmonyActionError,
   type ChordEditAction,
 } from "../harmony/actions";
+import { applyHarmonyPreferencePatch } from "../harmony/preferences";
 import type {
   DurationName,
   GenerationMode,
@@ -71,9 +72,7 @@ type ExplanationRequest = {
   }>;
 };
 
-// The Style dropdown was removed; a blank prompt uses the engine's original
-// default behavior (style "simple", no AI preferences).
-const BLANK_PROMPT_STYLE: StyleOption = "simple";
+const BLANK_PROMPT_STYLE: StyleOption = DEFAULT_INTERPRETED_STYLE.primaryStyle;
 
 const PROMPT_HELPER_TEXT =
   "Leave this blank to generate the progression that best fits your melody. " +
@@ -133,40 +132,6 @@ function getGroundedExplanationReasons(
   }
 
   return reasons;
-}
-
-function clampPref(value: number) {
-  return Math.min(1, Math.max(0, value));
-}
-
-// Applies the model's relative revision nudges on top of the preferences that
-// produced the current progression.
-function applyRevisionDeltas(
-  base: GenerationPreferences,
-  changes: RevisionIntent["requestedChanges"],
-): GenerationPreferences {
-  const complexityDelta = changes.complexityDelta ?? 0;
-
-  return {
-    style: base.style,
-    descendingBassWeight: clampPref(
-      base.descendingBassWeight + (changes.descendingBassDelta ?? 0),
-    ),
-    complexity: clampPref(base.complexity + complexityDelta),
-    dissonanceTolerance: clampPref(
-      base.dissonanceTolerance + (changes.dissonanceDelta ?? 0),
-    ),
-    cadenceStrength: clampPref(
-      base.cadenceStrength + (changes.cadenceDelta ?? 0),
-    ),
-    preferSevenths:
-      complexityDelta > 0.25
-        ? true
-        : complexityDelta < -0.25
-          ? false
-          : base.preferSevenths,
-    preferSuspensions: base.preferSuspensions,
-  };
 }
 
 const NOTE_DURATION_OPTIONS: {
@@ -743,14 +708,16 @@ export default function Staff() {
       normalizedPrompt,
       data?.primaryStyle ?? BLANK_PROMPT_STYLE,
     );
-    const preferences = data ? toGenerationPreferences(data) : undefined;
-    const styleSummary = data?.summary ?? "";
+    const preferences = toGenerationPreferences(
+      data ?? DEFAULT_INTERPRETED_STYLE,
+    );
+    const styleSummary = data?.summary ?? DEFAULT_INTERPRETED_STYLE.summary;
     const requestedActions = data?.actions ?? [];
 
     if (data) {
       setAiInterpretation(data);
     } else {
-      setAiInterpretation(null);
+      setAiInterpretation(DEFAULT_INTERPRETED_STYLE);
     }
 
     const generatedKey = getGenerationKey(
@@ -778,6 +745,7 @@ export default function Staff() {
       generatedKey.label,
       effectiveStyle,
       "Generated",
+      preferences,
     );
     setPendingClarification(null);
     setHarmonyAssistantMessage(null);
@@ -816,6 +784,38 @@ export default function Staff() {
         normalizedPrompt,
         aiInterpretation?.primaryStyle ?? BLANK_PROMPT_STYLE,
       );
+      // Apply only the returned preference patch to the current active
+      // preferences so a combined request (deterministic chord actions plus an
+      // explicit style/preference change like "make it jazzier") applies both.
+      // Unrelated preferences are preserved by applyHarmonyPreferencePatch.
+      const activePreferences = toGenerationPreferences(
+        aiInterpretation ?? DEFAULT_INTERPRETED_STYLE,
+      );
+      const effectivePreferences: GenerationPreferences = {
+        ...applyHarmonyPreferencePatch(
+          activePreferences,
+          data.revision?.requestedChanges ?? {},
+        ),
+        style: effectiveStyle,
+      };
+      const baseInterpretationForActions =
+        aiInterpretation ?? DEFAULT_INTERPRETED_STYLE;
+      const appliedInterpretation: InterpretedStyle = {
+        ...baseInterpretationForActions,
+        primaryStyle: effectiveStyle,
+        descendingBassWeight: effectivePreferences.descendingBassWeight,
+        complexity: effectivePreferences.complexity,
+        dissonanceTolerance: effectivePreferences.dissonanceTolerance,
+        cadenceStrength: effectivePreferences.cadenceStrength,
+        preferSevenths: effectivePreferences.preferSevenths,
+        preferSuspensions: effectivePreferences.preferSuspensions,
+        melodyFitPriority: effectivePreferences.melodyFitPriority,
+        consonancePriority: effectivePreferences.consonancePriority,
+        voiceLeadingPriority: effectivePreferences.voiceLeadingPriority,
+        playabilityRequired: effectivePreferences.playabilityRequired,
+      };
+      setAiInterpretation(appliedInterpretation);
+
       const finalProgression = applyRequestedActions(
         previousProgression,
         requestedActions,
@@ -827,6 +827,7 @@ export default function Staff() {
         generatedKey.label,
         effectiveStyle,
         "Updated",
+        effectivePreferences,
       );
       setPendingClarification(null);
       setHarmonyAssistantMessage(null);
@@ -847,7 +848,7 @@ export default function Staff() {
       changeAmount: 0.3,
       requestedChanges: {},
     };
-    const applied = applyRevisionDeltas(
+    const applied = applyHarmonyPreferencePatch(
       toGenerationPreferences(baseInterpretation),
       revisionIntent.requestedChanges,
     );
@@ -883,6 +884,10 @@ export default function Staff() {
       cadenceStrength: effectivePreferences.cadenceStrength,
       preferSevenths: effectivePreferences.preferSevenths,
       preferSuspensions: effectivePreferences.preferSuspensions,
+      melodyFitPriority: effectivePreferences.melodyFitPriority,
+      consonancePriority: effectivePreferences.consonancePriority,
+      voiceLeadingPriority: effectivePreferences.voiceLeadingPriority,
+      playabilityRequired: effectivePreferences.playabilityRequired,
       summary: data.summary || baseInterpretation.summary,
     };
     setAiInterpretation(appliedInterpretation);
@@ -906,6 +911,7 @@ export default function Staff() {
       generatedKey.label,
       effectiveStyle,
       "Updated",
+      effectivePreferences,
     );
     setPendingClarification(null);
     setHarmonyAssistantMessage(null);
@@ -989,11 +995,13 @@ export default function Staff() {
       );
 
       if (!data || data.warning) {
-        setAiInterpretation(null);
         setAiError(
           data?.warning ??
             "AI interpretation was unavailable. A default progression was generated instead.",
         );
+        if (previousProgression && previousProgression.length > 0) {
+          return;
+        }
         explanationContext = handleGenerateNewProgression(normalizedPrompt);
         return;
       }
@@ -1069,7 +1077,12 @@ export default function Staff() {
     // Re-voice the COMPLETE progression. Style mirrors what generation used:
     // the interpreted primaryStyle, or the blank-prompt default.
     const style = aiInterpretation?.primaryStyle ?? BLANK_PROMPT_STYLE;
-    setChordMeasures(voiceProgression(next, measures, getRenderedPitch, style));
+    const preferences = aiInterpretation
+      ? toGenerationPreferences(aiInterpretation)
+      : toGenerationPreferences(DEFAULT_INTERPRETED_STYLE);
+    setChordMeasures(
+      voiceProgression(next, measures, getRenderedPitch, style, preferences),
+    );
     setProgressionInfo(
       `Edited in ${editedKey.label}: ${next
         .map((scoredChord) => scoredChord.chord.name)

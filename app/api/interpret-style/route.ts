@@ -91,18 +91,24 @@ Rules:
 - Lower "dissonanceTolerance" for safe, smooth, or consonant requests.
 - Raise "dissonanceTolerance" for tense, surprising, or experimental requests.
 - Raise "cadenceStrength" for resolved, satisfying, or strong-ending requests.
+- Raise "melodyFitPriority" and "consonancePriority" for safe, melody-supporting, or ordinary requests.
+- Keep "playabilityRequired" true unless the user explicitly requests impractical or extreme spacing.
 
 All numeric fields are between 0 and 1. Respond with exactly this shape:
 {
   "intent": "generate_new",
   "confidence": 0.95,
   "primaryStyle": "simple",
+  "melodyFitPriority": 1.0,
+  "consonancePriority": 0.9,
   "descendingBassWeight": 0.0,
   "complexity": 0.0,
   "dissonanceTolerance": 0.0,
   "cadenceStrength": 0.0,
   "preferSevenths": false,
   "preferSuspensions": false,
+  "voiceLeadingPriority": 0.75,
+  "playabilityRequired": true,
   "mood": [],
   "summary": "",
   "revision": {
@@ -547,6 +553,14 @@ function sanitizeInterpretation(raw: unknown): InterpretedStyle {
   const data = (raw ?? {}) as Record<string, unknown>;
   return {
     primaryStyle: asStyle(data.primaryStyle),
+    melodyFitPriority: clamp01(
+      data.melodyFitPriority,
+      DEFAULT_INTERPRETED_STYLE.melodyFitPriority,
+    ),
+    consonancePriority: clamp01(
+      data.consonancePriority,
+      DEFAULT_INTERPRETED_STYLE.consonancePriority,
+    ),
     descendingBassWeight: clamp01(
       data.descendingBassWeight,
       DEFAULT_INTERPRETED_STYLE.descendingBassWeight,
@@ -567,6 +581,14 @@ function sanitizeInterpretation(raw: unknown): InterpretedStyle {
     preferSuspensions: asBoolean(
       data.preferSuspensions,
       DEFAULT_INTERPRETED_STYLE.preferSuspensions,
+    ),
+    voiceLeadingPriority: clamp01(
+      data.voiceLeadingPriority,
+      DEFAULT_INTERPRETED_STYLE.voiceLeadingPriority,
+    ),
+    playabilityRequired: asBoolean(
+      data.playabilityRequired,
+      DEFAULT_INTERPRETED_STYLE.playabilityRequired,
     ),
     mood: asMood(data.mood),
     summary: asSummary(data.summary),

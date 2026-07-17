@@ -19,7 +19,40 @@ import {
   noteCoversSlot,
   PC_TO_NOTE_SHARP,
   pitchToPc,
+  SCALE_OFFSETS,
 } from "./noteUtils";
+
+const MEASURE_SLOT_COUNT = 8;
+
+const INTERVAL_DISSONANCE_PENALTIES: Record<number, number> = {
+  0: 0,
+  1: 5,
+  2: 1.2,
+  3: 0,
+  4: 0,
+  5: 0.8,
+  6: 3.2,
+  7: 0,
+  8: 0.8,
+  9: 0,
+  10: 1.4,
+  11: 5,
+};
+
+export type MelodyFitOptions = {
+  melodyFitPriority?: number;
+  consonancePriority?: number;
+  dissonanceTolerance?: number;
+  isFinalMeasure?: boolean;
+};
+
+export type MelodyEvent = {
+  note: PlacedNote;
+  pc: number;
+  label: string;
+  importance: number;
+  index: number;
+};
 
 function getPcLabel(pc: number) {
   const noteName = PC_TO_NOTE_SHARP[mod12(pc)];
@@ -30,64 +63,185 @@ function getNoteNameLabel(noteName: string) {
   return NOTE_LABELS[noteName.toLowerCase()] ?? noteName.toUpperCase();
 }
 
-function getMeasureMelodyPcs(
+export function getMelodyNoteImportance(
+  note: PlacedNote,
   measureNotes: PlacedNote[],
-  getRenderedPitchFn: (note: PlacedNote) => string
+  isFinalMeasure = false
 ) {
   const beatSlots = getBeatSlots(DEFAULT_TIME_SIGNATURE);
+  const coveredBeatWeight = beatSlots.reduce((total, slot) => {
+    if (!noteCoversSlot(note, slot)) return total;
+    return total + getStrongBeatWeight(slot, DEFAULT_TIME_SIGNATURE);
+  }, 0);
+  const metricWeight = getMetricWeight(note.slot, DEFAULT_TIME_SIGNATURE);
+  const durationWeight = Math.min(2.2, note.durationSlots / 2);
+  const measureEnd = note.slot + note.durationSlots >= MEASURE_SLOT_COUNT;
+  const latestNoteEnd = Math.max(
+    ...measureNotes
+      .filter((measureNote) => measureNote.kind === "note")
+      .map((measureNote) => measureNote.slot + measureNote.durationSlots),
+    0
+  );
+  const isFinalMelodicEvent =
+    isFinalMeasure && note.slot + note.durationSlots >= latestNoteEnd;
 
-  return measureNotes.flatMap((note) => {
+  let importance = 1 + durationWeight + metricWeight * 0.45 + coveredBeatWeight * 0.25;
+
+  if (measureEnd) importance += 0.25;
+  if (isFinalMeasure) importance += 0.3;
+  if (isFinalMelodicEvent && note.durationSlots >= 2) importance += 0.7;
+
+  return importance;
+}
+
+function getMeasureMelodyEvents(
+  measureNotes: PlacedNote[],
+  getRenderedPitchFn: (note: PlacedNote) => string,
+  isFinalMeasure = false
+) {
+  return measureNotes.flatMap((note, index) => {
     if (note.kind === "rest") return [];
 
     const pc = pitchToPc(getRenderedPitchFn(note));
     if (pc === undefined) return [];
 
-    const beatWeight = beatSlots.reduce((total, slot) => {
-      if (!noteCoversSlot(note, slot)) return total;
-      return total + getStrongBeatWeight(slot, DEFAULT_TIME_SIGNATURE);
-    }, 0);
-
     return [
       {
+        note,
         pc,
         label: getPcLabel(pc),
-        weight:
-          note.durationSlots * getMetricWeight(note.slot, DEFAULT_TIME_SIGNATURE) +
-          beatWeight,
+        importance: getMelodyNoteImportance(note, measureNotes, isFinalMeasure),
+        index,
       },
     ];
   });
+}
+
+function getIntervalDistance(a: number, b: number) {
+  const interval = mod12(a - b);
+  return Math.min(interval, 12 - interval);
+}
+
+export function getIntervalDissonancePenalty(melodyPc: number, chordPc: number) {
+  return INTERVAL_DISSONANCE_PENALTIES[getIntervalDistance(melodyPc, chordPc)] ?? 0;
+}
+
+export function isStepwiseResolution(
+  event: MelodyEvent,
+  melodyEvents: MelodyEvent[]
+) {
+  const nextEvent = melodyEvents.find((candidate) => candidate.index > event.index);
+  if (!nextEvent) return false;
+  const distance = getIntervalDistance(event.pc, nextEvent.pc);
+  return distance === 1 || distance === 2;
+}
+
+function isWeakMetricPosition(note: PlacedNote) {
+  return getMetricWeight(note.slot, DEFAULT_TIME_SIGNATURE) < 1;
+}
+
+function getScalePcs(key: KeyContext) {
+  return SCALE_OFFSETS[key.mode].map((offset) => mod12(key.tonicPc + offset));
+}
+
+export function scoreMelodyNoteAgainstChord(
+  event: MelodyEvent,
+  melodyEvents: MelodyEvent[],
+  candidate: ChordCandidate,
+  key: KeyContext,
+  options: MelodyFitOptions = {}
+): ScoreResult {
+  const melodyFitPriority = options.melodyFitPriority ?? 1;
+  const consonancePriority = options.consonancePriority ?? 1;
+  const dissonanceTolerance = options.dissonanceTolerance ?? 0;
+  const toleranceMultiplier = 1 - 0.65 * dissonanceTolerance;
+  const reasons: string[] = [];
+  let points = 0;
+
+  if (candidate.pcs.includes(event.pc)) {
+    points += 2.4 * event.importance * melodyFitPriority;
+    if (event.importance >= 4) {
+      reasons.push(`Supports important melody note ${event.label}`);
+    }
+    return { points, reasons };
+  }
+
+  const strongestPenalty = Math.max(
+    ...candidate.pcs.map((pc) => getIntervalDissonancePenalty(event.pc, pc))
+  );
+  const resolvesByStep = isStepwiseResolution(event, melodyEvents);
+  const scaleCompatible = getScalePcs(key).includes(event.pc);
+  const weakResolvingNonChordTone =
+    scaleCompatible && isWeakMetricPosition(event.note) && resolvesByStep;
+  const sustained = event.note.durationSlots >= 4;
+
+  let penalty =
+    strongestPenalty *
+    event.importance *
+    consonancePriority *
+    toleranceMultiplier;
+
+  if (weakResolvingNonChordTone) penalty *= 0.3;
+  else if (resolvesByStep) penalty *= 0.55;
+  if (sustained) penalty *= 1.2;
+
+  if (penalty > 0) {
+    points -= penalty;
+    if (strongestPenalty >= 4) {
+      reasons.push(`${event.label} creates an exposed semitone clash`);
+    } else if (strongestPenalty >= 3) {
+      reasons.push(`${event.label} creates a strong non-chord dissonance`);
+    }
+  } else {
+    points -= 0.35 * event.importance * melodyFitPriority;
+  }
+
+  if (resolvesByStep && strongestPenalty > 0) {
+    points += 0.6 * event.importance * melodyFitPriority;
+    reasons.push(`${event.label} resolves by step as a non-chord tone`);
+  }
+
+  return { points, reasons };
 }
 
 export function scoreMelodyFit(
   candidate: ChordCandidate,
   melodyNotes: PlacedNote[],
   getRenderedPitchFn: (note: PlacedNote) => string,
-  // Scales the penalty for clashing with the main melody note. 1 = full
-  // penalty (default / dropdown path); higher dissonance tolerance lowers it.
-  clashMultiplier = 1
+  key: KeyContext,
+  options: MelodyFitOptions = {}
 ): ScoreResult {
-  const melodyPcs = getMeasureMelodyPcs(melodyNotes, getRenderedPitchFn);
-  if (melodyPcs.length === 0) return { points: 0, reasons: [] };
+  const melodyEvents = getMeasureMelodyEvents(
+    melodyNotes,
+    getRenderedPitchFn,
+    options.isFinalMeasure
+  );
+  if (melodyEvents.length === 0) return { points: 0, reasons: [] };
 
-  const mainMelody = melodyPcs
-    .slice()
-    .sort((a, b) => b.weight - a.weight)[0];
-  const matchingNotes = melodyPcs.filter(({ pc }) => candidate.pcs.includes(pc));
   const reasons: string[] = [];
-  let points = 0;
+  const scoreParts = melodyEvents.map((event) =>
+    scoreMelodyNoteAgainstChord(event, melodyEvents, candidate, key, options)
+  );
+  const matchingNotes = melodyEvents.filter(({ pc }) => candidate.pcs.includes(pc));
+  const importantMatch = matchingNotes.some((event) => event.importance >= 4);
 
-  if (candidate.pcs.includes(mainMelody.pc)) {
-    points += 5;
-    reasons.push(`Contains the main melody note ${mainMelody.label}`);
-  } else {
-    points -= 4 * clashMultiplier;
-    reasons.push(`Does not contain the main melody note ${mainMelody.label}`);
+  if (importantMatch) {
+    reasons.push("Contains an important melody note from the measure");
+  }
+  if (matchingNotes.length > 1) {
+    reasons.push("Contains multiple melody notes from the measure");
   }
 
-  if (matchingNotes.length > 1) {
-    points += 3;
-    reasons.push("Contains multiple melody notes from the measure");
+  const points =
+    scoreParts.reduce((total, part) => total + part.points, 0) +
+    (matchingNotes.length > 1 ? 1.5 : 0);
+
+  for (const part of scoreParts) {
+    reasons.push(...part.reasons);
+  }
+
+  if (options.isFinalMeasure && importantMatch) {
+    reasons.push("Supports the final-measure melody");
   }
 
   return { points, reasons };
@@ -358,18 +512,24 @@ export function scoreChord(
   candidate: ChordCandidate,
   context: ChordScoreContext
 ): ScoredChord {
-  // dissonanceTolerance softens the melody-clash penalty: 0 -> full penalty,
-  // 1 -> only 20% of it. Never reaches zero. Dropdown path keeps full penalty.
-  const clashMultiplier = context.preferences
-    ? 1 - 0.8 * context.preferences.dissonanceTolerance
-    : 1;
+  const melodyFitOptions: MelodyFitOptions = context.preferences
+    ? {
+        melodyFitPriority: context.preferences.melodyFitPriority,
+        consonancePriority: context.preferences.consonancePriority,
+        dissonanceTolerance: context.preferences.dissonanceTolerance,
+        isFinalMeasure: context.measureIndex === context.measureCount - 1,
+      }
+    : {
+        isFinalMeasure: context.measureIndex === context.measureCount - 1,
+      };
 
   const scoreParts: ScoreResult[] = [
     scoreMelodyFit(
       candidate,
       context.measureNotes,
       context.getRenderedPitchFn,
-      clashMultiplier
+      context.key,
+      melodyFitOptions
     ),
     scoreKeyFit(candidate, context.key),
     scoreStyle(candidate, context.style, context),

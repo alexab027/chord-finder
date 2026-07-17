@@ -69,13 +69,19 @@ export type ScoredChord = {
 
 export type GenerationPreferences = {
   style: StyleOption;
+  melodyFitPriority: number;
+  consonancePriority: number;
   descendingBassWeight: number;
   complexity: number;
   dissonanceTolerance: number;
   cadenceStrength: number;
   preferSevenths: boolean;
   preferSuspensions: boolean;
+  voiceLeadingPriority: number;
+  playabilityRequired: boolean;
 };
+
+export type HarmonyPreferences = GenerationPreferences;
 
 // Identity of one chord in the progression being revised. Used to reward the
 // engine for staying close to the user's current progression.
@@ -101,6 +107,8 @@ export type ChordScoreContext = {
   key: KeyContext;
   style: StyleOption;
   measureNotes: PlacedNote[];
+  measureIndex: number;
+  measureCount: number;
   getRenderedPitchFn: (note: PlacedNote) => string;
   previousChord?: ChordCandidate;
   // Present only on the AI-interpreted path. When undefined, scoring behaves
