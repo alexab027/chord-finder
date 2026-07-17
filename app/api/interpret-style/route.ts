@@ -273,6 +273,63 @@ function isValidChordName(value: string) {
   return new RegExp(`^${CHORD_NAME_PATTERN}$`).test(value.trim());
 }
 
+type NamedChordEdit =
+  | { kind: "action"; action: ChordEditAction }
+  | { kind: "clarify"; question: string };
+
+function parseNamedChordTarget(value: string): number | null {
+  const normalized = value.trim().toLowerCase();
+  const ordinals: Record<string, number> = {
+    first: 1,
+    second: 2,
+    third: 3,
+    fourth: 4,
+    fifth: 5,
+    sixth: 6,
+    seventh: 7,
+    eighth: 8,
+    ninth: 9,
+  };
+  return ordinals[normalized] ?? parseMeasureToken(normalized);
+}
+
+function parseExplicitNamedChordEdit(prompt: string): NamedChordEdit | null {
+  const targetToken =
+    "\\d+|one|two|three|four|five|six|seven|eight|nine|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth";
+  const targetFirst = new RegExp(
+    `^\\s*replace\\s+(?:the\\s+)?(${targetToken})\\s*(?:st|nd|rd|th)?\\s*(?:chord|measure)\\s+with\\s+(${CHORD_NAME_PATTERN})\\s*[.,!?]?\\s*$`,
+    "i",
+  ).exec(prompt);
+  const chordFirst = new RegExp(
+    `^\\s*(?:add|insert|set|replace)\\s+(?:a\\s+)?(${CHORD_NAME_PATTERN})(?:\\s+(somewhere|(?:in\\s+)?(?:measure|chord)\\s+(${targetToken})|as\\s+(?:the\\s+)?(${targetToken})\\s*(?:st|nd|rd|th)?\\s+chord))?\\s*[.,!?]?\\s*$`,
+    "i",
+  ).exec(prompt);
+
+  const chordName = targetFirst?.[2] ?? chordFirst?.[1];
+  if (!chordName || !isValidChordName(chordName)) return null;
+
+  const rawTarget = targetFirst?.[1] ?? chordFirst?.[3] ?? chordFirst?.[4];
+  if (!rawTarget) {
+    return {
+      kind: "clarify",
+      question: "Which measure should be replaced with this chord?",
+    };
+  }
+
+  const measure = parseNamedChordTarget(rawTarget);
+  if (!measure || measure < 1 || measure > STAFF_MEASURE_COUNT) {
+    return {
+      kind: "clarify",
+      question: `Measure ${rawTarget} is out of range. Which measure from 1-${STAFF_MEASURE_COUNT} should be replaced?`,
+    };
+  }
+
+  return {
+    kind: "action",
+    action: { type: "replace_chord", measure, chordName },
+  };
+}
+
 function extractExplicitCopyActions(prompt: string): ChordEditAction[] {
   const actions: ChordEditAction[] = [];
   const pattern =
@@ -670,6 +727,25 @@ export async function POST(request: Request): Promise<Response> {
       },
       400,
     );
+  }
+
+  const namedChordEdit = parseExplicitNamedChordEdit(prompt);
+  if (namedChordEdit?.kind === "clarify") {
+    return json({
+      ...DEFAULT_INTERPRETED_STYLE,
+      intent: "clarify",
+      confidence: 1,
+      actions: [],
+      clarificationQuestion: namedChordEdit.question,
+    });
+  }
+  if (namedChordEdit?.kind === "action") {
+    return json({
+      ...DEFAULT_INTERPRETED_STYLE,
+      intent: "revise_existing",
+      confidence: 1,
+      actions: [namedChordEdit.action],
+    });
   }
 
   const replacementSyntaxError = validateExplicitReplacementSyntax(prompt);
