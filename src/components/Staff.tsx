@@ -695,14 +695,16 @@ export default function Staff() {
     keyLabel: string,
     effectiveStyle: StyleOption,
     label: "Generated" | "Updated",
+    preferences?: GenerationPreferences,
   ) {
-    lastProgressionRef.current = finalProgression;
     const voicedProgression = voiceProgression(
       finalProgression,
       measures,
       getRenderedPitch,
       effectiveStyle,
+      preferences,
     );
+    lastProgressionRef.current = finalProgression;
     setChordMeasures(voicedProgression);
     setProgressionInfo(
       `${label} in ${keyLabel}: ${finalProgression
