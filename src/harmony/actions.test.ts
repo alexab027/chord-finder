@@ -99,6 +99,10 @@ describe("harmony edit actions", () => {
     );
 
     expect(edited[1].chord.name).toBe("iimin7");
+    expect(edited[1].chord.romanNumeral).toBe("iimin7");
+    expect(edited[1].chord.absoluteSymbol).toBe("Dm7");
+    expect(edited[1].chord.rootName).toBe("D");
+    expect(edited[1].chord.name).toBe(edited[1].chord.romanNumeral);
     expect(edited[3].chord.name).toBe(edited[1].chord.name);
     expect(edited[3].chord.name).not.toBe(originalSecondChordName);
   });

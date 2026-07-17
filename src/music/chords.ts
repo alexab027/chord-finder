@@ -41,6 +41,18 @@ function formatBassName(noteName: string) {
   return NOTE_LABELS[noteName.toLowerCase()] ?? noteName.toUpperCase();
 }
 
+function getAbsoluteTriadSuffix(quality: "major" | "minor" | "dim") {
+  if (quality === "minor") return "m";
+  if (quality === "dim") return "dim";
+  return "";
+}
+
+function getAbsoluteSeventhSuffix(quality: "maj7" | "min7" | "dom7") {
+  if (quality === "maj7") return "maj7";
+  if (quality === "min7") return "m7";
+  return "7";
+}
+
 function buildInversionCandidates(
   candidate: ChordCandidate,
   maxBassIndex = candidate.pcs.length - 1
@@ -68,7 +80,9 @@ function buildInversionCandidates(
 
     candidates.push({
       ...candidate,
-      name: `${candidate.name}/${formatBassName(bassName)}`,
+      name: `${candidate.romanNumeral}/${formatBassName(bassName)}`,
+      romanNumeral: `${candidate.romanNumeral}/${formatBassName(bassName)}`,
+      absoluteSymbol: `${candidate.absoluteSymbol}/${formatBassName(bassName)}`,
       bassPc: pcs[0],
       bassName,
       inversion: bassIndex,
@@ -111,6 +125,9 @@ function buildMajorKeyChords(key: KeyContext): ChordCandidate[] {
     const triad: ChordCandidate = {
       degree: degreeIndex + 1,
       name: romanNumerals[degreeIndex],
+      romanNumeral: romanNumerals[degreeIndex],
+      absoluteSymbol: `${formatBassName(degree.name)}${getAbsoluteTriadSuffix(TRIAD_QUALITIES[key.mode][degreeIndex])}`,
+      rootName: formatBassName(degree.name),
       rootPc: degree.pc,
       bassPc: degree.pc,
       pcs,
@@ -130,7 +147,8 @@ function buildMajorKeyChords(key: KeyContext): ChordCandidate[] {
         degreeIndex + 1,
         romanNumerals[degreeIndex],
         pcs,
-        degree.name
+        degree.name,
+        TRIAD_QUALITIES[key.mode][degreeIndex]
       ),
       ...buildSeventhChordCandidates(
         degreeIndex + 1,
@@ -202,6 +220,9 @@ function buildSuspendedChordCandidate(
   return {
     degree,
     name: `${romanNumeral}${quality}`,
+    romanNumeral: `${romanNumeral}${quality}`,
+    absoluteSymbol: `${formatBassName(rootName)}${quality === "sus" ? "sus4" : quality}`,
+    rootName: formatBassName(rootName),
     rootPc,
     bassPc: rootPc,
     pcs,
@@ -221,7 +242,8 @@ function buildAdd9ChordCandidate(
   degree: number,
   romanNumeral: string,
   triadPcs: number[],
-  rootName: string
+  rootName: string,
+  triadQuality: "major" | "minor" | "dim"
 ): ChordCandidate {
   const ninthPc = mod12(triadPcs[0] + 14);
   const ninthLetter = getScaleLetter(rootName, 1);
@@ -236,6 +258,9 @@ function buildAdd9ChordCandidate(
   return {
     degree,
     name: `${romanNumeral}add9`,
+    romanNumeral: `${romanNumeral}add9`,
+    absoluteSymbol: `${formatBassName(rootName)}${triadQuality === "minor" ? "m(add9)" : "add9"}`,
+    rootName: formatBassName(rootName),
     rootPc: pcs[0],
     bassPc: pcs[0],
     pcs,
@@ -280,6 +305,9 @@ function buildSeventhChordCandidate(
   return {
     degree,
     name: `${romanNumeral}${quality}`,
+    romanNumeral: `${romanNumeral}${quality}`,
+    absoluteSymbol: `${formatBassName(rootName)}${getAbsoluteSeventhSuffix(quality)}`,
+    rootName: formatBassName(rootName),
     rootPc,
     bassPc: rootPc,
     pcs,
@@ -383,6 +411,9 @@ export function buildRequestedChord(
     return {
       degree: degreeIndex + 1,
       name: romanBase,
+      romanNumeral: romanBase,
+      absoluteSymbol: `${formatBassName(rootName)}${getAbsoluteTriadSuffix(triadQuality)}`,
+      rootName: formatBassName(rootName),
       rootPc: triadPcs[0],
       bassPc: triadPcs[0],
       pcs: triadPcs,
@@ -415,6 +446,9 @@ export function buildRequestedChord(
   return {
     degree: degreeIndex + 1,
     name: `${romanBase}${suffix}`,
+    romanNumeral: `${romanBase}${suffix}`,
+    absoluteSymbol: `${formatBassName(rootName)}${quality === "diminished" ? "m7b5" : getAbsoluteSeventhSuffix(engineQuality)}`,
+    rootName: formatBassName(rootName),
     rootPc: pcs[0],
     bassPc: pcs[0],
     pcs,
@@ -542,6 +576,9 @@ export function buildNamedChord(
     return {
       degree,
       name: romanBase,
+      romanNumeral: romanBase,
+      absoluteSymbol: `${formatBassName(parsed.rootName)}${getAbsoluteTriadSuffix(triadQuality)}`,
+      rootName: formatBassName(parsed.rootName),
       rootPc: triadPcs[0],
       bassPc: triadPcs[0],
       pcs: triadPcs,
@@ -575,6 +612,9 @@ export function buildNamedChord(
   return {
     degree,
     name: `${romanBase}${engineQuality}`,
+    romanNumeral: `${romanBase}${engineQuality}`,
+    absoluteSymbol: `${formatBassName(parsed.rootName)}${getAbsoluteSeventhSuffix(engineQuality)}`,
+    rootName: formatBassName(parsed.rootName),
     rootPc: pcs[0],
     bassPc: pcs[0],
     pcs,
@@ -639,6 +679,9 @@ export function buildKeyChords(key: KeyContext): ChordCandidate[] {
     const triad: ChordCandidate = {
       degree: degreeIndex + 1,
       name: ROMAN_NUMERALS[key.mode][degreeIndex],
+      romanNumeral: ROMAN_NUMERALS[key.mode][degreeIndex],
+      absoluteSymbol: `${formatBassName(degree.name)}${getAbsoluteTriadSuffix(quality)}`,
+      rootName: formatBassName(degree.name),
       rootPc: degree.pc,
       bassPc: degree.pc,
       pcs,
@@ -658,7 +701,8 @@ export function buildKeyChords(key: KeyContext): ChordCandidate[] {
         degreeIndex + 1,
         ROMAN_NUMERALS[key.mode][degreeIndex],
         pcs,
-        degree.name
+        degree.name,
+        quality
       ),
       ...buildSeventhChordCandidates(
         degreeIndex + 1,

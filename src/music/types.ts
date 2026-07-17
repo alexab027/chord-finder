@@ -43,7 +43,11 @@ export type ChordQuality =
 
 export type ChordCandidate = {
   degree: number;
+  /** Compatibility alias; always equal to romanNumeral. */
   name: string;
+  romanNumeral: string;
+  absoluteSymbol: string;
+  rootName: string;
   rootPc: number;
   bassPc: number;
   bassName?: string;

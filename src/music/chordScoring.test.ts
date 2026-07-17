@@ -14,6 +14,9 @@ function triad(name: string, pcs: number[]): ChordCandidate {
   return {
     degree: 1,
     name,
+    romanNumeral: name,
+    absoluteSymbol: name,
+    rootName: name,
     rootPc: pcs[0],
     bassPc: pcs[0],
     pcs,

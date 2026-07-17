@@ -48,6 +48,12 @@ import {
   type RevisionIntent,
 } from "../ai/types";
 import { toGenerationPreferences } from "../ai/toGenerationPreferences";
+import {
+  buildExplanationIdentityItems,
+  buildProgressionIdentityItems,
+  formatProgressionSummary,
+  type CurrentProgressionItem,
+} from "../music/progressionPresentation";
 
 type AiProgressionExplanation = {
   overview: string;
@@ -574,7 +580,7 @@ export default function Staff() {
   // against a different current progression always asks the route fresh.
   async function fetchInterpretation(
     prompt: string,
-    currentProgression?: Array<{ measure: number; romanNumeral: string }>,
+    currentProgression?: CurrentProgressionItem[],
     activeKey?: string,
   ): Promise<HarmonyRouterResponse | null> {
     try {
@@ -635,6 +641,7 @@ export default function Staff() {
     if (finalProgression.length === 0) return null;
 
     const bassMidiSequence = getVoicedBassMidiSequence(voicedProgression);
+    const identities = buildExplanationIdentityItems(finalProgression);
 
     return {
       activeKey: keyLabel,
@@ -642,9 +649,7 @@ export default function Staff() {
       styleRequest,
       styleSummary,
       progression: finalProgression.map((scoredChord, index) => ({
-        measure: index + 1,
-        symbol: scoredChord.chord.name,
-        romanNumeral: scoredChord.chord.name,
+        ...identities[index],
         score: scoredChord.score,
         reasons: getGroundedExplanationReasons(
           scoredChord,
@@ -672,9 +677,7 @@ export default function Staff() {
     lastProgressionRef.current = finalProgression;
     setChordMeasures(voicedProgression);
     setProgressionInfo(
-      `${label} in ${keyLabel}: ${finalProgression
-        .map((scoredChord) => scoredChord.chord.name)
-        .join(" - ")}`,
+      formatProgressionSummary(`${label} in ${keyLabel}`, finalProgression),
     );
     return voicedProgression;
   }
@@ -945,9 +948,10 @@ export default function Staff() {
     const currentProgression = lastProgressionRef.current;
     if (currentProgression && currentProgression.length > 0) {
       setProgressionInfo(
-        `Current progression unchanged: ${currentProgression
-          .map((scoredChord) => scoredChord.chord.name)
-          .join(" - ")}`,
+        formatProgressionSummary(
+          "Current progression unchanged",
+          currentProgression,
+        ),
       );
     }
     setHarmonyAssistantMessage(
@@ -976,10 +980,7 @@ export default function Staff() {
 
       const previousProgression = lastProgressionRef.current;
       const currentProgressionSummary = previousProgression
-        ? previousProgression.map((scoredChord, index) => ({
-            measure: index + 1,
-            romanNumeral: scoredChord.chord.name,
-          }))
+        ? buildProgressionIdentityItems(previousProgression)
         : undefined;
       const activeKey = getGenerationKey(
         keySignature,
@@ -1422,7 +1423,9 @@ export default function Staff() {
         )}
 
         {hasProgression && (
-          <p className="text-sm text-gray-700">{progressionInfo}</p>
+          <p className="whitespace-pre-line text-sm text-gray-700">
+            {progressionInfo}
+          </p>
         )}
 
         {(isExplaining || aiExplanation || aiExplainError) && (

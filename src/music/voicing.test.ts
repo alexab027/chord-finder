@@ -71,6 +71,9 @@ describe("voicing validity", () => {
         chord: {
           degree: 1,
           name: "Iadd9",
+          romanNumeral: "Iadd9",
+          absoluteSymbol: "Cadd9",
+          rootName: "C",
           rootPc: 0,
           bassPc: 0,
           pcs: [0, 4, 7, 2],
@@ -172,6 +175,9 @@ describe("voicing validity", () => {
         chord: {
           degree: 1,
           name: "I",
+          romanNumeral: "I",
+          absoluteSymbol: "C",
+          rootName: "C",
           rootPc: 0,
           bassPc: 0,
           pcs: [0, 4, 7],
@@ -187,6 +193,9 @@ describe("voicing validity", () => {
         chord: {
           degree: 7,
           name: "VII",
+          romanNumeral: "VII",
+          absoluteSymbol: "B",
+          rootName: "B",
           rootPc: 11,
           bassPc: 11,
           pcs: [11, 2, 6],
@@ -219,6 +228,9 @@ describe("voicing validity", () => {
         chord: {
           degree: 1,
           name: "isus",
+          romanNumeral: "isus",
+          absoluteSymbol: "Csus4",
+          rootName: "C",
           rootPc: 4,
           bassPc: 4,
           pcs: [0, 0, 8],

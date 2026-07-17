@@ -38,7 +38,11 @@ const SUPPORTED_ACTION_TYPES = [
 
 const CHORD_NAME_PATTERN = "[A-Ga-g][#b]?(?:maj|min|m|dim|o|°|dom)?7?";
 
-type CurrentProgressionItem = { measure: number; romanNumeral: string };
+type CurrentProgressionItem = {
+  measure: number;
+  absoluteSymbol: string;
+  romanNumeral: string;
+};
 
 // Shared, appended to both prompts. Lets the model express EXACT chord requests
 // as a small action list. It never returns chord pitch names — only scale
@@ -67,7 +71,7 @@ Rules:
 - "intent" must be exactly one of: "generate_new", "revise_existing", "clarify", "answer_question".
 - "confidence" must be a number between 0 and 1.
 - "primaryStyle" must be exactly one of: "simple", "jazzy", "bluesy", "descendingBass". Use no other value.
-- Do not return chord names. Do not generate a progression.
+- Do not generate a progression. Do not invent chord names for generation or revision; for answer_question, you may repeat absolute chord symbols supplied in currentProgression.
 - Explicit generation verbs strongly imply "generate_new": "make", "generate", "create", "give me", "start over", "new progression", "make me a progression", "make a new progression", and "generate a progression" are "generate_new" unless the user clearly asks to change the existing progression.
 - Use "generate_new" when the user asks for a new progression, a different style, to start over, or asks broadly for "make me" / "give me" harmony.
 - If pendingClarification exists, the latest user message resolves it. If the latest message says "new progression", "make a new progression", "generate one", "start over", or similar, return "generate_new" even if the original ambiguous request could have been a revision.
@@ -81,6 +85,7 @@ Rules:
 - If the user asks to revise an existing progression but none exists, still classify as "revise_existing"; the application will guard it.
 - For "clarify", include a concise "clarificationQuestion".
 - For "answer_question", include a concise "assistantMessage". If there is no progression context, say that there is not enough progression to answer.
+- For "answer_question", use currentProgression.absoluteSymbol for ordinary chord names and currentProgression.romanNumeral for harmonic function. Both are trusted application context.
 - Distinguish harmonic transposition from voicing movement. "Transpose up two" is ambiguous; return "clarify". Do not return unsupported transposition or voicing actions.
 - Do not return a revision action unless it is supported by the exact chord edits schema below.
 - Map simple / pop / clean / basic language toward "simple".
@@ -149,7 +154,7 @@ function clampDelta(value: unknown): number | undefined {
   return Math.min(1, Math.max(-1, value));
 }
 
-function sanitizeCurrentProgression(value: unknown): CurrentProgressionItem[] {
+export function sanitizeCurrentProgression(value: unknown): CurrentProgressionItem[] {
   if (!Array.isArray(value)) return [];
   return value.slice(0, MAX_PROGRESSION_MEASURES).flatMap((raw) => {
     const item = (raw ?? {}) as Record<string, unknown>;
@@ -158,14 +163,19 @@ function sanitizeCurrentProgression(value: unknown): CurrentProgressionItem[] {
       typeof item.romanNumeral === "string"
         ? item.romanNumeral.trim().slice(0, MAX_SYMBOL_LENGTH)
         : "";
+    const absoluteSymbol =
+      typeof item.absoluteSymbol === "string"
+        ? item.absoluteSymbol.trim().slice(0, MAX_SYMBOL_LENGTH)
+        : romanNumeral;
     if (
       typeof measure !== "number" ||
       !Number.isFinite(measure) ||
-      !romanNumeral
+      !romanNumeral ||
+      !absoluteSymbol
     ) {
       return [];
     }
-    return [{ measure, romanNumeral }];
+    return [{ measure, absoluteSymbol, romanNumeral }];
   });
 }
 
