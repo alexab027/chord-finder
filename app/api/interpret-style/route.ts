@@ -820,7 +820,14 @@ export async function POST(request: Request): Promise<Response> {
   const model = process.env.GROQ_MODEL ?? "llama-3.1-8b-instant";
 
   try {
-    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    // Fail fast into the graceful fallback below rather than hanging. The SDK
+    // defaults (maxRetries 2 + a long timeout) can turn one slow/rate-limited
+    // call into 20s+ of backoff on the user's critical path.
+    const groq = new Groq({
+      apiKey: process.env.GROQ_API_KEY,
+      timeout: 10_000,
+      maxRetries: 1,
+    });
 
     const userContent = JSON.stringify({
       message: prompt,

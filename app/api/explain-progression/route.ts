@@ -282,7 +282,14 @@ export async function POST(request: Request): Promise<Response> {
   };
 
   try {
-    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    // Fail fast into the graceful fallback below rather than hanging. The SDK
+    // defaults (maxRetries 2 + a long timeout) can turn one slow/rate-limited
+    // call into 20s+ of backoff.
+    const groq = new Groq({
+      apiKey: process.env.GROQ_API_KEY,
+      timeout: 10_000,
+      maxRetries: 1,
+    });
 
     const completion = await groq.chat.completions.create({
       model,
