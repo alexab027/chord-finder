@@ -19,7 +19,7 @@ import type { ChordEditAction } from "./actions";
 
 // Same chord-name vocabulary the server route uses (interpret-style/route.ts).
 // Kept in sync intentionally; a later pass may extract one shared constant.
-const CHORD = "[A-Ga-g][#b]?(?:maj|min|m|dim|o|°|dom)?7?";
+const CHORD = "[A-Ga-g][#b]?(?:sus2|sus4|sus|maj|min|m|dim|o|°|dom)?7?";
 
 // Measure references: digits, number words, or ordinal words (+ optional
 // st/nd/rd/th suffix so "2nd" and "second" both work).

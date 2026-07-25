@@ -36,7 +36,8 @@ const SUPPORTED_ACTION_TYPES = [
   "replace_chord",
 ] as const;
 
-const CHORD_NAME_PATTERN = "[A-Ga-g][#b]?(?:maj|min|m|dim|o|°|dom)?7?";
+const CHORD_NAME_PATTERN =
+  "[A-Ga-g][#b]?(?:sus2|sus4|sus|maj|min|m|dim|o|°|dom)?7?";
 
 type CurrentProgressionItem = {
   measure: number;
@@ -551,7 +552,11 @@ function sanitizeActions(value: unknown): ChordEditAction[] {
       if (!isIntInRange(item.measure, 1, STAFF_MEASURE_COUNT)) continue;
       if (typeof item.chordName !== "string") continue;
       const chordName = item.chordName.trim().slice(0, MAX_SYMBOL_LENGTH);
-      if (!/^[A-Ga-g][#b]?(maj|min|m|dim|o|°|dom)?7?$/.test(chordName)) {
+      if (
+        !/^[A-Ga-g][#b]?(sus2|sus4|sus|maj|min|m|dim|o|°|dom)?7?$/.test(
+          chordName
+        )
+      ) {
         continue;
       }
 

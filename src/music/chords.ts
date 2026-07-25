@@ -501,12 +501,12 @@ function parseNamedChord(chordName: string):
   | {
       rootName: string;
       rootPc: number;
-      quality: RequestedChordQuality;
+      quality: RequestedChordQuality | SuspendedChordQuality;
       extension?: 7;
     }
   | null {
   const normalized = chordName.trim().replace(/\s+/g, "");
-  const match = /^([A-Ga-g])([#b]?)(maj|min|m|dim|o|°|dom)?(7)?$/.exec(
+  const match = /^([A-Ga-g])([#b]?)(sus2|sus4|sus|maj|min|m|dim|o|°|dom)?(7)?$/.exec(
     normalized
   );
   if (!match) return null;
@@ -516,6 +516,16 @@ function parseNamedChord(chordName: string):
   if (rootPc === undefined) return null;
 
   const rawQuality = match[3]?.toLowerCase();
+
+  // Suspended chords have no third, so they bypass the triad-quality mapping.
+  // A bare "sus" is conventionally sus4. A trailing "7" is ignored for sus.
+  if (rawQuality === "sus2") {
+    return { rootName, rootPc, quality: "sus2" };
+  }
+  if (rawQuality === "sus4" || rawQuality === "sus") {
+    return { rootName, rootPc, quality: "sus4" };
+  }
+
   const quality: RequestedChordQuality =
     rawQuality === "m" || rawQuality === "min"
       ? "minor"
@@ -541,6 +551,37 @@ export function buildNamedChord(
 ): ChordCandidate | null {
   const parsed = parseNamedChord(chordName);
   if (!parsed) return null;
+
+  // Suspended chords are built by the same helper the generator uses, so a
+  // user-named "Dsus4" is identical to a generated one. Roman-numeral case is
+  // taken from the diatonic degree (sus has no third to imply major/minor).
+  if (
+    parsed.quality === "sus" ||
+    parsed.quality === "sus2" ||
+    parsed.quality === "sus4"
+  ) {
+    const susDegreeIndex = SCALE_OFFSETS[key.mode].findIndex(
+      (offset) => mod12(key.tonicPc + offset) === parsed.rootPc
+    );
+    const romanBase =
+      susDegreeIndex === -1
+        ? NOTE_LABELS[PC_TO_NOTE_SHARP[parsed.rootPc]]
+        : ROMAN_NUMERALS[key.mode][susDegreeIndex]
+            .replace(/\s*dim$/, "")
+            .replace(/°/g, "");
+    const candidate = buildSuspendedChordCandidate(
+      susDegreeIndex === -1 ? 0 : susDegreeIndex + 1,
+      romanBase,
+      parsed.rootPc,
+      parsed.rootName,
+      getScaleLetter(parsed.rootName, 4),
+      parsed.quality
+    );
+    return {
+      ...candidate,
+      keyFit: susDegreeIndex === -1 ? "unrelated" : "diatonic",
+    };
+  }
 
   const triadQuality: "major" | "minor" | "dim" =
     parsed.quality === "minor"

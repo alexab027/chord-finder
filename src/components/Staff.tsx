@@ -1044,7 +1044,6 @@ export default function Staff() {
       // exact chord edit, apply it locally and skip BOTH Groq calls. Requires an
       // existing progression to edit; anything else (style clauses, mixed
       // prompts, questions) fails the total-parse gate and falls through to Groq.
-      // explanationContext stays null, so the finally block makes no call either.
       if (previousProgression && previousProgression.length > 0) {
         const directEdits = parsePureDirectEdits(
           normalizedPrompt,

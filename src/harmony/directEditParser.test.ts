@@ -35,6 +35,18 @@ describe("parsePureDirectEdits — accepts pure exact edits", () => {
     ]);
   });
 
+  it("accepts suspended chord names (sus2 / sus4 / bare sus)", () => {
+    expect(parsePureDirectEdits("change measure 2 to Dsus4", N)).toEqual([
+      { type: "replace_chord", measure: 2, chordName: "Dsus4" },
+    ]);
+    expect(parsePureDirectEdits("set chord 1 to Gsus2", N)).toEqual([
+      { type: "replace_chord", measure: 1, chordName: "Gsus2" },
+    ]);
+    expect(parsePureDirectEdits("replace measure 3 with Asus", N)).toEqual([
+      { type: "replace_chord", measure: 3, chordName: "Asus" },
+    ]);
+  });
+
   it("copy one measure to another", () => {
     expect(parsePureDirectEdits("copy measure 1 to measure 4", N)).toEqual([
       { type: "copy_chord", fromMeasure: 1, toMeasure: 4 },
