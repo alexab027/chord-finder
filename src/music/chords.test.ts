@@ -61,6 +61,22 @@ describe("chord identities", () => {
     expect(chord?.name).toBe(chord?.romanNumeral);
   });
 
+  it("builds a major seventh from a literal name (Cmaj7), not a dominant seventh", () => {
+    const maj7 = buildNamedChord(cMajor, "Cmaj7");
+
+    expect(maj7).toMatchObject({
+      name: "Imaj7",
+      romanNumeral: "Imaj7",
+      absoluteSymbol: "Cmaj7",
+      quality: "maj7",
+    });
+    // Major seventh = C E G B (pcs 0,4,7,11) — the leading tone B, not Bb.
+    expect(maj7?.pcs).toEqual([0, 4, 7, 11]);
+
+    // Regression: a bare "7" stays dominant (C E G Bb).
+    expect(buildNamedChord(cMajor, "C7")?.pcs).toEqual([0, 4, 7, 10]);
+  });
+
   it("builds a suspended fourth from a literal name (Dsus4)", () => {
     const chord = buildNamedChord(cMajor, "Dsus4");
 

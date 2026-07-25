@@ -534,9 +534,11 @@ function parseNamedChord(chordName: string):
         ? "diminished"
         : rawQuality === "dom"
           ? "dominant"
-          : match[4] === "7"
-            ? "dominant"
-            : "major";
+          : rawQuality === "maj"
+            ? "major"
+            : match[4] === "7"
+              ? "dominant"
+              : "major";
 
   return {
     rootName,
@@ -679,6 +681,7 @@ function assertCmajorNamedChordMappings() {
     C: "I",
     Dm: "ii",
     Dm7: "iimin7",
+    Cmaj7: "Imaj7",
     Em: "iii",
     F: "IV",
     G: "V",
