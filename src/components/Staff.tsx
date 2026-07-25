@@ -52,10 +52,10 @@ import { toGenerationPreferences } from "../ai/toGenerationPreferences";
 import {
   buildExplanationIdentityItems,
   buildProgressionIdentityItems,
-  formatProgressionSummary,
   type CurrentProgressionItem,
 } from "../music/progressionPresentation";
 import HarmonyToolbar from "./chord-finder/HarmonyToolbar";
+import HarmonyChat, { type ChatMessage } from "./chord-finder/HarmonyChat";
 
 type AiProgressionExplanation = {
   overview: string;
@@ -104,6 +104,12 @@ function getEffectiveStyle(
   return asksForExplicitDescendingBass(prompt)
     ? "descendingBass"
     : fallbackStyle;
+}
+
+// "C major" reads better as just "C" in a card heading; minor keys keep the
+// mode so "A minor" stays unambiguous.
+function formatKeyForHeading(keyLabel: string) {
+  return keyLabel.replace(/\s+major$/i, "");
 }
 
 function getVoicedBassMidiSequence(voicedProgression: PlacedChord[][]) {
@@ -163,20 +169,18 @@ export default function Staff() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [pendingClarification, setPendingClarification] =
     useState<PendingClarification | null>(null);
-  const [harmonyAssistantMessage, setHarmonyAssistantMessage] = useState<
-    string | null
-  >(null);
+  // The persistent harmony conversation: user prompts, assistant answers, and
+  // progression cards, in order. Append-only so the chat reads naturally.
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const messageIdRef = useRef(0);
 
   // The full scored progression behind the rendered chords. Kept in a ref (not
   // rendered) so revisions can pass the current chord identities into scoring.
   const lastProgressionRef = useRef<ScoredChord[] | null>(null);
 
-  // Plain-English explanation of the current progression. Requested
-  // automatically after each generation; grounded only in engine output.
-  const [aiExplanation, setAiExplanation] =
-    useState<AiProgressionExplanation | null>(null);
+  // True only while an on-demand explanation is being fetched (see
+  // handleAnswerQuestion). Explanations are never requested automatically.
   const [isExplaining, setIsExplaining] = useState(false);
-  const [aiExplainError, setAiExplainError] = useState<string | null>(null);
 
   // Stores the real top and bottom staff line y-values from VexFlow
   const topStaffLineYRef = useRef<number>(40);
@@ -194,9 +198,6 @@ export default function Staff() {
     [],
     [],
   ]);
-  const [progressionInfo, setProgressionInfo] = useState(
-    "Chord staff is empty. Generate chords to fill it.",
-  );
   const staffX = 20;
   const melodyStaffY = 40;
   const chordStaffY = 190;
@@ -581,8 +582,38 @@ export default function Staff() {
     }
   }
 
-  // Best-effort plain-English explanation. Failures never block or undo a
-  // generated progression.
+  function nextMessageId() {
+    messageIdRef.current += 1;
+    return `msg-${messageIdRef.current}`;
+  }
+
+  function pushMessage(message: ChatMessage) {
+    setMessages((prev) => [...prev, message]);
+  }
+
+  function pushUserMessage(text: string) {
+    pushMessage({ id: nextMessageId(), kind: "text", role: "user", text });
+  }
+
+  function pushAssistantMessage(text: string) {
+    pushMessage({ id: nextMessageId(), kind: "text", role: "assistant", text });
+  }
+
+  function pushProgressionCard(
+    label: "Generated" | "Updated",
+    keyLabel: string,
+    progression: ScoredChord[],
+  ) {
+    pushMessage({
+      id: nextMessageId(),
+      kind: "progression",
+      heading: `${label} in ${formatKeyForHeading(keyLabel)}`,
+      items: buildProgressionIdentityItems(progression),
+    });
+  }
+
+  // Best-effort plain-English explanation, requested only when the user asks a
+  // question. Failures never block or undo a progression.
   async function requestExplanation(requestBody: ExplanationRequest) {
     setIsExplaining(true);
 
@@ -594,17 +625,22 @@ export default function Staff() {
       });
 
       if (!response.ok) {
-        setAiExplainError(
-          "Plain-English explanation is unavailable right now. The progression above is still ready to play.",
+        pushAssistantMessage(
+          "A plain-English explanation is unavailable right now. The progression is still ready to play.",
         );
         return;
       }
 
       const data = (await response.json()) as AiProgressionExplanation;
-      setAiExplanation(data);
+      pushMessage({
+        id: nextMessageId(),
+        kind: "explanation",
+        overview: data.overview,
+        measures: data.measures.filter((measure) => measure.explanation),
+      });
     } catch {
-      setAiExplainError(
-        "Plain-English explanation is unavailable right now. The progression above is still ready to play.",
+      pushAssistantMessage(
+        "A plain-English explanation is unavailable right now. The progression is still ready to play.",
       );
     } finally {
       setIsExplaining(false);
@@ -656,9 +692,7 @@ export default function Staff() {
     );
     lastProgressionRef.current = finalProgression;
     setChordMeasures(voicedProgression);
-    setProgressionInfo(
-      formatProgressionSummary(`${label} in ${keyLabel}`, finalProgression),
-    );
+    pushProgressionCard(label, keyLabel, finalProgression);
     return voicedProgression;
   }
 
@@ -686,7 +720,7 @@ export default function Staff() {
   function handleGenerateNewProgression(
     normalizedPrompt: string,
     data?: HarmonyRouterResponse,
-  ): ExplanationRequest | null {
+  ): void {
     const effectiveStyle = getEffectiveStyle(
       normalizedPrompt,
       data?.primaryStyle ?? BLANK_PROMPT_STYLE,
@@ -694,7 +728,6 @@ export default function Staff() {
     const preferences = toGenerationPreferences(
       data ?? DEFAULT_INTERPRETED_STYLE,
     );
-    const styleSummary = data?.summary ?? DEFAULT_INTERPRETED_STYLE.summary;
     const requestedActions = data?.actions ?? [];
 
     if (data) {
@@ -723,7 +756,7 @@ export default function Staff() {
       generatedKey,
     );
 
-    const voicedProgression = renderProgression(
+    renderProgression(
       finalProgression,
       generatedKey.label,
       effectiveStyle,
@@ -731,27 +764,18 @@ export default function Staff() {
       preferences,
     );
     setPendingClarification(null);
-    setHarmonyAssistantMessage(null);
-
-    return buildExplanationRequest(
-      finalProgression,
-      voicedProgression,
-      generatedKey.label,
-      normalizedPrompt,
-      styleSummary,
-    );
   }
 
   function handleReviseExistingProgression(
     normalizedPrompt: string,
     data: HarmonyRouterResponse,
-  ): ExplanationRequest | null {
+  ): void {
     const previousProgression = lastProgressionRef.current;
     if (!previousProgression || previousProgression.length === 0) {
-      setHarmonyAssistantMessage(
+      pushAssistantMessage(
         "There is no existing progression to edit. Would you like me to generate one first?",
       );
-      return null;
+      return;
     }
 
     const generatedKey = getGenerationKey(
@@ -805,7 +829,7 @@ export default function Staff() {
         generatedKey,
       );
 
-      const voicedProgression = renderProgression(
+      renderProgression(
         finalProgression,
         generatedKey.label,
         effectiveStyle,
@@ -813,15 +837,7 @@ export default function Staff() {
         effectivePreferences,
       );
       setPendingClarification(null);
-      setHarmonyAssistantMessage(null);
-
-      return buildExplanationRequest(
-        finalProgression,
-        voicedProgression,
-        generatedKey.label,
-        normalizedPrompt,
-        aiInterpretation?.summary ?? "",
-      );
+      return;
     }
 
     const baseInterpretation = aiInterpretation ?? DEFAULT_INTERPRETED_STYLE;
@@ -889,7 +905,7 @@ export default function Staff() {
       generatedKey,
     );
 
-    const voicedProgression = renderProgression(
+    renderProgression(
       finalProgression,
       generatedKey.label,
       effectiveStyle,
@@ -897,15 +913,6 @@ export default function Staff() {
       effectivePreferences,
     );
     setPendingClarification(null);
-    setHarmonyAssistantMessage(null);
-
-    return buildExplanationRequest(
-      finalProgression,
-      voicedProgression,
-      generatedKey.label,
-      normalizedPrompt,
-      appliedInterpretation.summary,
-    );
   }
 
   // Direct-edit fast path. Applies pre-parsed exact edits to the current
@@ -951,7 +958,6 @@ export default function Staff() {
       effectivePreferences,
     );
     setPendingClarification(null);
-    setHarmonyAssistantMessage(null);
   }
 
   function handleClarification(
@@ -966,41 +972,69 @@ export default function Staff() {
       originalMessage,
       question,
     });
-    setHarmonyAssistantMessage(question);
+    pushAssistantMessage(question);
   }
 
-  function handleAnswerQuestion(data: HarmonyRouterResponse) {
+  // Explanations are surfaced ONLY here — when the user explicitly asks a
+  // question. Nothing else in the app auto-requests an explanation. When there
+  // is a progression to ground against, we fetch the grounded plain-English
+  // explanation; otherwise we fall back to the model's short answer.
+  function handleAnswerQuestion(
+    data: HarmonyRouterResponse,
+    normalizedPrompt: string,
+  ) {
     setPendingClarification(null);
     const currentProgression = lastProgressionRef.current;
-    if (currentProgression && currentProgression.length > 0) {
-      setProgressionInfo(
-        formatProgressionSummary(
-          "Current progression unchanged",
-          currentProgression,
-        ),
+
+    if (!currentProgression || currentProgression.length === 0) {
+      pushAssistantMessage(
+        data.assistantMessage ??
+          "There isn't a progression yet — generate one first, then ask me about it.",
       );
+      return;
     }
-    setHarmonyAssistantMessage(
-      data.assistantMessage ??
-        "I could not determine an answer from the current progression.",
+
+    const generatedKey = getGenerationKey(
+      keySignature,
+      generationMode,
+      measures,
+      getRenderedPitch,
     );
+    const request = buildExplanationRequest(
+      currentProgression,
+      chordMeasures,
+      generatedKey.label,
+      normalizedPrompt,
+      aiInterpretation?.summary ?? "",
+    );
+
+    if (!request) {
+      pushAssistantMessage(
+        data.assistantMessage ??
+          "I could not build an explanation for the current progression.",
+      );
+      return;
+    }
+
+    void requestExplanation(request);
   }
 
   // Route first, then generate, revise, clarify, or answer.
   async function handleGenerateProgression() {
     setIsGenerating(true);
     setAiError(null);
-    setHarmonyAssistantMessage(null);
-    setAiExplanation(null);
-    setAiExplainError(null);
 
-    let explanationContext: ExplanationRequest | null = null;
+    const normalizedPrompt = stylePrompt.trim();
+    // Record the user's turn in the conversation, then clear the input so the
+    // chat reads as a back-and-forth. A blank prompt means "best fit for me".
+    pushUserMessage(
+      normalizedPrompt === "" ? "Generate a progression" : normalizedPrompt,
+    );
+    setStylePrompt("");
 
     try {
-      const normalizedPrompt = stylePrompt.trim();
-
       if (normalizedPrompt === "") {
-        explanationContext = handleGenerateNewProgression(normalizedPrompt);
+        handleGenerateNewProgression(normalizedPrompt);
         return;
       }
 
@@ -1050,28 +1084,22 @@ export default function Staff() {
         if (previousProgression && previousProgression.length > 0) {
           return;
         }
-        explanationContext = handleGenerateNewProgression(normalizedPrompt);
+        handleGenerateNewProgression(normalizedPrompt);
         return;
       }
 
       switch (data.intent) {
         case "generate_new":
-          explanationContext = handleGenerateNewProgression(
-            normalizedPrompt,
-            data,
-          );
+          handleGenerateNewProgression(normalizedPrompt, data);
           break;
         case "revise_existing":
-          explanationContext = handleReviseExistingProgression(
-            normalizedPrompt,
-            data,
-          );
+          handleReviseExistingProgression(normalizedPrompt, data);
           break;
         case "clarify":
           handleClarification(data, normalizedPrompt);
           break;
         case "answer_question":
-          handleAnswerQuestion(data);
+          handleAnswerQuestion(data, normalizedPrompt);
           break;
       }
     } catch (error) {
@@ -1079,9 +1107,6 @@ export default function Staff() {
       setAiError("Something went wrong while generating. Please try again.");
     } finally {
       setIsGenerating(false);
-      if (explanationContext) {
-        await requestExplanation(explanationContext);
-      }
     }
   }
 
@@ -1131,17 +1156,9 @@ export default function Staff() {
     setChordMeasures(
       voiceProgression(next, measures, getRenderedPitch, style, preferences),
     );
-    setProgressionInfo(
-      `Edited in ${editedKey.label}: ${next
-        .map((scoredChord) => scoredChord.chord.name)
-        .join(" - ")}`,
-    );
-
-    // The prior explanation described the pre-edit chords; clear it. We do NOT
-    // auto-request a new explanation: copied chords carry stale positional
-    // score/reasons, so the grounded explanation payload would be misleading.
-    setAiExplanation(null);
-    setAiExplainError(null);
+    pushProgressionCard("Updated", editedKey.label, next);
+    // We do NOT auto-request an explanation here: copied chords carry stale
+    // positional score/reasons, so a grounded explanation would be misleading.
     setAiError(null);
   }
 
@@ -1203,20 +1220,16 @@ export default function Staff() {
 
   function clearChords() {
     setChordMeasures([[], [], [], []]);
-    setProgressionInfo("Chord progression cleared.");
-    // Clear all progression metadata + explanation so nothing is stale.
-    setAiExplanation(null);
-    setAiExplainError(null);
+    // Clear progression metadata so nothing is stale. The conversation log is
+    // left intact so the history of the session stays readable.
     setAiInterpretation(null);
     setPendingClarification(null);
-    setHarmonyAssistantMessage(null);
     lastProgressionRef.current = null;
+    pushAssistantMessage("Chord progression cleared.");
   }
 
   const hasNotes = measures.some((measure) => measure.length > 0);
   const hasProgression = chordMeasures.some((measure) => measure.length > 0);
-  const visibleExplanationMeasures =
-    aiExplanation?.measures.filter((measure) => measure.explanation) ?? [];
 
   return (
     <div className="space-y-8">
@@ -1267,96 +1280,20 @@ export default function Staff() {
         </div>
       </section>
 
-      {/* Section 2: harmony prompt, generate/update, progression summary, explanation */}
-      <section className="w-full max-w-3xl space-y-3 border-t border-[var(--border)] pt-6">
-        <label className="flex flex-col gap-1">
-          <span className="text-sm font-semibold text-[var(--text)]">
-            Describe the harmony you want
-          </span>
-          <span className="text-xs leading-5 text-[var(--text-muted)]">
-            {PROMPT_HELPER_TEXT}
-          </span>
-          <textarea
-            value={stylePrompt}
-            onChange={(event) => setStylePrompt(event.target.value)}
-            maxLength={500}
-            rows={3}
-            placeholder={
-              hasProgression ? REVISION_PLACEHOLDER : FRESH_PLACEHOLDER
-            }
-            className="mt-1 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
-          />
-        </label>
-
-        <button
-          onClick={handleGenerateProgression}
-          disabled={isGenerating}
-          className={
-            isGenerating
-              ? "h-10 cursor-not-allowed rounded-md border border-[var(--border)] bg-[#ecece8] px-4 text-sm font-semibold text-[var(--text-muted)]"
-              : "h-10 rounded-md border border-[var(--accent-border)] bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:bg-[var(--accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
-          }
-        >
-          {isGenerating
-            ? hasProgression
-              ? "Updating…"
-              : "Generating…"
-            : hasProgression
-              ? "Update progression"
-              : "Generate progression"}
-        </button>
-
-        {aiError && <p className="text-xs text-[var(--warning)]">{aiError}</p>}
-
-        {harmonyAssistantMessage && (
-          <p className="text-sm text-[var(--text-muted)]">
-            {harmonyAssistantMessage}
-          </p>
-        )}
-
-        {hasProgression && (
-          <p className="whitespace-pre-line text-sm text-[var(--text-muted)]">
-            {progressionInfo}
-          </p>
-        )}
-
-        {(isExplaining || aiExplanation || aiExplainError) && (
-          <div className="space-y-2 rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] p-3 text-sm">
-            <div className="font-semibold text-[var(--text)]">
-              In plain English
-            </div>
-
-            {isExplaining && (
-              <p className="text-[var(--text-muted)]">
-                Writing a plain-English explanation…
-              </p>
-            )}
-
-            {aiExplainError && (
-              <p className="text-xs text-[var(--warning)]">{aiExplainError}</p>
-            )}
-
-            {aiExplanation?.overview && (
-              <p className="text-[var(--text-muted)]">
-                {aiExplanation.overview}
-              </p>
-            )}
-
-            {visibleExplanationMeasures.length > 0 && (
-              <ul className="space-y-1 text-[var(--text-muted)]">
-                {visibleExplanationMeasures.map((measure) => (
-                  <li key={`ai-explanation-${measure.measure}`}>
-                    <span className="font-medium">
-                      Measure {measure.measure} ({measure.chord}):
-                    </span>{" "}
-                    {measure.explanation}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-      </section>
+      <HarmonyChat
+        composerValue={stylePrompt}
+        error={aiError}
+        hasProgression={hasProgression}
+        helperText={PROMPT_HELPER_TEXT}
+        isExplaining={isExplaining}
+        isGenerating={isGenerating}
+        messages={messages}
+        onComposerChange={setStylePrompt}
+        onSubmit={handleGenerateProgression}
+        placeholder={
+          hasProgression ? REVISION_PLACEHOLDER : FRESH_PLACEHOLDER
+        }
+      />
     </div>
   );
 }
