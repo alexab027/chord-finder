@@ -29,6 +29,7 @@ import {
   HarmonyActionError,
   type ChordEditAction,
 } from "../harmony/actions";
+import { parsePureDirectEdits } from "../harmony/directEditParser";
 import { applyHarmonyPreferencePatch } from "../harmony/preferences";
 import type {
   DurationName,
@@ -907,6 +908,52 @@ export default function Staff() {
     );
   }
 
+  // Direct-edit fast path. Applies pre-parsed exact edits to the current
+  // progression locally, reusing the same deterministic engine and re-voicing
+  // as the revise path. Deliberately makes NO network call (neither Groq
+  // interpretation nor explanation): a pure exact edit needs no interpretation,
+  // and direct edits never auto-request an explanation. Preferences/style are
+  // taken unchanged from the active interpretation, since a pure edit carries no
+  // style clause.
+  function handleDirectEditShortcut(
+    normalizedPrompt: string,
+    actions: ChordEditAction[],
+    previousProgression: ScoredChord[],
+  ): void {
+    const generatedKey = getGenerationKey(
+      keySignature,
+      generationMode,
+      measures,
+      getRenderedPitch,
+    );
+    const activeInterpretation = aiInterpretation ?? DEFAULT_INTERPRETED_STYLE;
+    const effectiveStyle = activeInterpretation.primaryStyle ?? BLANK_PROMPT_STYLE;
+    const effectivePreferences: GenerationPreferences = {
+      ...toGenerationPreferences(activeInterpretation),
+      style: effectiveStyle,
+    };
+
+    const finalProgression = applyRequestedActions(
+      previousProgression,
+      actions,
+      generatedKey,
+    );
+
+    // applyRequestedActions returns the SAME array reference on failure (after
+    // surfacing the error via setAiError). Don't claim a successful update then.
+    if (finalProgression === previousProgression) return;
+
+    renderProgression(
+      finalProgression,
+      generatedKey.label,
+      effectiveStyle,
+      "Updated",
+      effectivePreferences,
+    );
+    setPendingClarification(null);
+    setHarmonyAssistantMessage(null);
+  }
+
   function handleClarification(
     data: HarmonyRouterResponse,
     originalMessage: string,
@@ -958,6 +1005,27 @@ export default function Staff() {
       }
 
       const previousProgression = lastProgressionRef.current;
+
+      // Direct-edit fast path: if the whole prompt is nothing but one supported
+      // exact chord edit, apply it locally and skip BOTH Groq calls. Requires an
+      // existing progression to edit; anything else (style clauses, mixed
+      // prompts, questions) fails the total-parse gate and falls through to Groq.
+      // explanationContext stays null, so the finally block makes no call either.
+      if (previousProgression && previousProgression.length > 0) {
+        const directEdits = parsePureDirectEdits(
+          normalizedPrompt,
+          previousProgression.length,
+        );
+        if (directEdits) {
+          handleDirectEditShortcut(
+            normalizedPrompt,
+            directEdits,
+            previousProgression,
+          );
+          return;
+        }
+      }
+
       const currentProgressionSummary = previousProgression
         ? buildProgressionIdentityItems(previousProgression)
         : undefined;
