@@ -72,8 +72,6 @@ const CADENCE_WEIGHT = 1.0;
 const OPENING_TONIC_BONUS = 2;
 const DEFAULT_BASS_OCTAVE = 3;
 const NARROW_DESCENDING_BASS_WEIGHT = 2;
-const TOP_PATH_COUNT = 8;
-const TOP_SCORE_WINDOW = 8;
 
 function buildChordPaths(
   mode: KeyMode,
@@ -297,12 +295,11 @@ export function chooseProgression(
     )
     .sort((a, b) => b.score - a.score);
 
-  const bestScore = rankedPaths[0]?.score ?? 0;
-  const topChoices = rankedPaths
-    .filter((choice) => choice.score >= bestScore - TOP_SCORE_WINDOW)
-    .slice(0, TOP_PATH_COUNT);
-  const choices = topChoices.length > 0 ? topChoices : rankedPaths;
-  const chosen = choices[Math.floor(Math.random() * choices.length)];
-
-  return chosen?.scoredChords ?? [];
+  // Deterministic: always return the highest-scored path. This previously
+  // picked randomly from a top-scoring window, which made identical requests
+  // produce different progressions. Array.sort is stable, so score ties resolve
+  // to the first-generated path and the result is reproducible across calls.
+  // (Exposing the full ranked pool for multi-candidate previews is a separate,
+  // later change; today's callers want a single best progression.)
+  return rankedPaths[0]?.scoredChords ?? [];
 }
