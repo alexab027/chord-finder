@@ -15,6 +15,7 @@ import {
   SCALE_OFFSETS,
   spellPitchClassForLetter,
 } from "./noteUtils";
+import { CHORD_QUALITIES } from "../harmony/chordSymbol";
 
 export const TRIAD_QUALITIES: Record<
   KeyMode,
@@ -506,9 +507,9 @@ function parseNamedChord(chordName: string):
     }
   | null {
   const normalized = chordName.trim().replace(/\s+/g, "");
-  const match = /^([A-Ga-g])([#b]?)(sus2|sus4|sus|maj|min|m|dim|o|°|dom)?(7)?$/.exec(
-    normalized
-  );
+  const match = new RegExp(
+    `^([A-Ga-g])([#b]?)(${CHORD_QUALITIES})?(7)?$`
+  ).exec(normalized);
   if (!match) return null;
 
   const rootName = `${match[1].toLowerCase()}${match[2] ?? ""}`;

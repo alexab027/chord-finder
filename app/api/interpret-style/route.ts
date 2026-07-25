@@ -13,6 +13,7 @@ import type {
   ChordEditAction,
   HarmonyChordQuality,
 } from "@/src/harmony/actions";
+import { CHORD_SYMBOL } from "@/src/harmony/chordSymbol";
 
 const MAX_PROMPT_LENGTH = 500;
 const MAX_KEY_LENGTH = 40;
@@ -36,8 +37,7 @@ const SUPPORTED_ACTION_TYPES = [
   "replace_chord",
 ] as const;
 
-const CHORD_NAME_PATTERN =
-  "[A-Ga-g][#b]?(?:sus2|sus4|sus|maj|min|m|dim|o|°|dom)?7?";
+const CHORD_NAME_PATTERN = CHORD_SYMBOL;
 
 type CurrentProgressionItem = {
   measure: number;
@@ -552,11 +552,7 @@ function sanitizeActions(value: unknown): ChordEditAction[] {
       if (!isIntInRange(item.measure, 1, STAFF_MEASURE_COUNT)) continue;
       if (typeof item.chordName !== "string") continue;
       const chordName = item.chordName.trim().slice(0, MAX_SYMBOL_LENGTH);
-      if (
-        !/^[A-Ga-g][#b]?(sus2|sus4|sus|maj|min|m|dim|o|°|dom)?7?$/.test(
-          chordName
-        )
-      ) {
+      if (!isValidChordName(chordName)) {
         continue;
       }
 

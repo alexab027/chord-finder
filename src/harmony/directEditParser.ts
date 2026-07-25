@@ -1,4 +1,5 @@
 import type { ChordEditAction } from "./actions";
+import { CHORD_SYMBOL } from "./chordSymbol";
 
 // Client-side "total-parse" gate for the direct-edit fast path.
 //
@@ -17,9 +18,9 @@ import type { ChordEditAction } from "./actions";
 //  - emits replace_chord / copy_chord actions, which the existing deterministic
 //    engine (harmony/actions.applyChordEdits) validates and applies.
 
-// Same chord-name vocabulary the server route uses (interpret-style/route.ts).
-// Kept in sync intentionally; a later pass may extract one shared constant.
-const CHORD = "[A-Ga-g][#b]?(?:sus2|sus4|sus|maj|min|m|dim|o|°|dom)?7?";
+// The shared chord-name vocabulary (see chordSymbol.ts). Aliased to CHORD so the
+// patterns below read the same.
+const CHORD = CHORD_SYMBOL;
 
 // Measure references: digits, number words, or ordinal words (+ optional
 // st/nd/rd/th suffix so "2nd" and "second" both work).
