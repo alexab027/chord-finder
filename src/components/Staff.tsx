@@ -19,6 +19,7 @@ import {
 } from "../harmony/actions";
 import { parsePureDirectEdits } from "../harmony/directEditParser";
 import { applyHarmonyPreferencePatch } from "../harmony/preferences";
+import { useHarmonyMessages } from "./chord-finder/useHarmonyMessages";
 import type {
   DurationName,
   GenerationMode,
@@ -46,7 +47,7 @@ import {
   type CurrentProgressionItem,
 } from "../music/progressionPresentation";
 import HarmonyToolbar from "./chord-finder/HarmonyToolbar";
-import HarmonyChat, { type ChatMessage } from "./chord-finder/HarmonyChat";
+import HarmonyChat from "./chord-finder/HarmonyChat";
 import { renderPitch, yToPitch } from "./chord-finder/pitchSpelling";
 import StaffRenderer from "./chord-finder/StaffRenderer";
 
@@ -85,12 +86,6 @@ function getEffectiveStyle(
     : fallbackStyle;
 }
 
-// "C major" reads better as just "C" in a card heading; minor keys keep the
-// mode so "A minor" stays unambiguous.
-function formatKeyForHeading(keyLabel: string) {
-  return keyLabel.replace(/\s+major$/i, "");
-}
-
 export default function Staff() {
   const staffWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -113,8 +108,13 @@ export default function Staff() {
     useState<PendingClarification | null>(null);
   // The persistent harmony conversation: user prompts, assistant answers, and
   // progression cards, in order. Append-only so the chat reads naturally.
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const messageIdRef = useRef(0);
+  const {
+    messages,
+    pushUserMessage,
+    pushAssistantMessage,
+    pushProgressionCard,
+    pushExplanationMessage,
+  } = useHarmonyMessages();
 
   // The full scored progression behind the rendered chords. Kept in a ref (not
   // rendered) so revisions can pass the current chord identities into scoring.
@@ -237,36 +237,6 @@ export default function Staff() {
     }
   }
 
-  function nextMessageId() {
-    messageIdRef.current += 1;
-    return `msg-${messageIdRef.current}`;
-  }
-
-  function pushMessage(message: ChatMessage) {
-    setMessages((prev) => [...prev, message]);
-  }
-
-  function pushUserMessage(text: string) {
-    pushMessage({ id: nextMessageId(), kind: "text", role: "user", text });
-  }
-
-  function pushAssistantMessage(text: string) {
-    pushMessage({ id: nextMessageId(), kind: "text", role: "assistant", text });
-  }
-
-  function pushProgressionCard(
-    label: "Generated" | "Updated",
-    keyLabel: string,
-    progression: ScoredChord[],
-  ) {
-    pushMessage({
-      id: nextMessageId(),
-      kind: "progression",
-      heading: `${label} in ${formatKeyForHeading(keyLabel)}`,
-      items: buildProgressionIdentityItems(progression),
-    });
-  }
-
   // Best-effort plain-English explanation, requested only when the user asks a
   // question. Failures never block or undo a progression.
   async function requestExplanation(requestBody: ExplanationRequest) {
@@ -287,12 +257,10 @@ export default function Staff() {
       }
 
       const data = (await response.json()) as AiProgressionExplanation;
-      pushMessage({
-        id: nextMessageId(),
-        kind: "explanation",
-        overview: data.overview,
-        measures: data.measures.filter((measure) => measure.explanation),
-      });
+      pushExplanationMessage(
+        data.overview,
+        data.measures.filter((measure) => measure.explanation),
+      );
     } catch {
       pushAssistantMessage(
         "A plain-English explanation is unavailable right now. The progression is still ready to play.",
