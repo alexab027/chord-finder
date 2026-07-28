@@ -17,11 +17,11 @@ import { chooseProgression } from "../music/chordGeneration";
 import { getGenerationKey } from "../music/keyDetection";
 import {
   DURATION_TO_SLOTS,
-  getKeySignatureExtraWidth,
   KEY_SIGNATURE_ACCIDENTALS,
   parsePitchToMidi,
   PITCHES_TOP_TO_BOTTOM,
 } from "../music/noteUtils";
+import { getStaffGeometry } from "./chord-finder/staffGeometry";
 import { voiceProgression } from "../music/voicing";
 import {
   applyChordEdit,
@@ -198,15 +198,15 @@ export default function Staff() {
     [],
     [],
   ]);
-  const staffX = 20;
-  const melodyStaffY = 40;
-  const chordStaffY = 190;
-  const baseFirstMeasureExtra = 90;
-  const firstMeasureExtra =
-    baseFirstMeasureExtra + getKeySignatureExtraWidth(keySignature);
-  const baseMeasureWidth = 300;
-  const rendererWidth = staffX * 2 + baseMeasureWidth * 4 + firstMeasureExtra;
-  const rendererHeight = 310;
+  const {
+    staffX,
+    melodyStaffY,
+    chordStaffY,
+    firstMeasureExtra,
+    baseMeasureWidth,
+    rendererWidth,
+    rendererHeight,
+  } = getStaffGeometry(keySignature);
 
   useEffect(() => {
     if (!containerRef.current) return;
