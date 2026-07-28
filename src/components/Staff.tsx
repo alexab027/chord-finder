@@ -15,11 +15,7 @@ import {
 import { playMeasuresAudio } from "../audio/playback";
 import { chooseProgression } from "../music/chordGeneration";
 import { getGenerationKey } from "../music/keyDetection";
-import {
-  DURATION_TO_SLOTS,
-  KEY_SIGNATURE_ACCIDENTALS,
-  PITCHES_TOP_TO_BOTTOM,
-} from "../music/noteUtils";
+import { DURATION_TO_SLOTS } from "../music/noteUtils";
 import {
   getStaffGeometry,
   getMeasureInfoFromClick,
@@ -61,6 +57,7 @@ import {
 } from "../music/progressionPresentation";
 import HarmonyToolbar from "./chord-finder/HarmonyToolbar";
 import HarmonyChat, { type ChatMessage } from "./chord-finder/HarmonyChat";
+import { renderPitch, yToPitch } from "./chord-finder/pitchSpelling";
 
 type AiProgressionExplanation = {
   overview: string;
@@ -162,6 +159,49 @@ export default function Staff() {
     rendererWidth,
     rendererHeight,
   } = getStaffGeometry(keySignature);
+
+  const getRenderedPitch = (note: PlacedNote) =>
+    renderPitch(note, keySignature);
+
+  function buildTickables(measureNotes: PlacedNote[]) {
+    const tickables: (StaveNote | GhostNote)[] = [];
+
+    let usedSlots = 0;
+
+    for (const note of measureNotes) {
+      const renderedPitch = getRenderedPitch(note);
+
+      const staveNote = new StaveNote({
+        keys: [renderedPitch],
+        duration: note.kind === "rest" ? `${note.duration}r` : note.duration,
+      });
+
+      if (note.kind === "note" && note.accidental !== null) {
+        staveNote.addModifier(new Accidental(note.accidental), 0);
+      }
+
+      tickables.push(staveNote);
+
+      usedSlots += note.durationSlots;
+    }
+
+    let remainingSlots = 8 - usedSlots;
+
+    while (remainingSlots > 0) {
+      if (remainingSlots >= 4) {
+        tickables.push(new GhostNote("h"));
+        remainingSlots -= 4;
+      } else if (remainingSlots >= 2) {
+        tickables.push(new GhostNote("q"));
+        remainingSlots -= 2;
+      } else {
+        tickables.push(new GhostNote("8"));
+        remainingSlots -= 1;
+      }
+    }
+
+    return tickables;
+  }
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -320,46 +360,6 @@ export default function Staff() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [measures, chordMeasures, keySignature, rendererWidth, firstMeasureExtra]);
 
-  function buildTickables(measureNotes: PlacedNote[]) {
-    const tickables: (StaveNote | GhostNote)[] = [];
-
-    let usedSlots = 0;
-
-    for (const note of measureNotes) {
-      const renderedPitch = getRenderedPitch(note);
-
-      const staveNote = new StaveNote({
-        keys: [renderedPitch],
-        duration: note.kind === "rest" ? `${note.duration}r` : note.duration,
-      });
-
-      if (note.kind === "note" && note.accidental !== null) {
-        staveNote.addModifier(new Accidental(note.accidental), 0);
-      }
-
-      tickables.push(staveNote);
-
-      usedSlots += note.durationSlots;
-    }
-
-    let remainingSlots = 8 - usedSlots;
-
-    while (remainingSlots > 0) {
-      if (remainingSlots >= 4) {
-        tickables.push(new GhostNote("h"));
-        remainingSlots -= 4;
-      } else if (remainingSlots >= 2) {
-        tickables.push(new GhostNote("q"));
-        remainingSlots -= 2;
-      } else {
-        tickables.push(new GhostNote("8"));
-        remainingSlots -= 1;
-      }
-    }
-
-    return tickables;
-  }
-
   function getNextAvailableSlot(measureNotes: PlacedNote[]) {
     let nextSlot = 0;
 
@@ -390,7 +390,12 @@ export default function Staff() {
 
     if (!measureInfo) return;
 
-    const pitch = yToPitch(clickY);
+    const pitch = yToPitch(
+      clickY,
+      topStaffLineYRef.current,
+      bottomStaffLineYRef.current,
+    );
+
     const durationSlots = DURATION_TO_SLOTS[selectedDuration];
 
     setMeasures((prevMeasures) => {
@@ -417,65 +422,6 @@ export default function Staff() {
       setSelectedAccidental(null);
       return newMeasures;
     });
-  }
-
-  function getRenderedPitch(note: PlacedNote) {
-    if (note.kind === "rest") {
-      return note.pitch;
-    }
-
-    const [letter, octave] = note.pitch.split("/");
-    const lowerLetter = letter.toLowerCase();
-
-    // Explicit accidental wins.
-    if (note.accidental === "#") {
-      return `${lowerLetter}#/${octave}`;
-    }
-
-    if (note.accidental === "b") {
-      return `${lowerLetter}b/${octave}`;
-    }
-
-    if (note.accidental === "n") {
-      return `${lowerLetter}/${octave}`;
-    }
-
-    // Otherwise use key signature.
-    const keyMap = KEY_SIGNATURE_ACCIDENTALS[keySignature] ?? {};
-    const keyAccidental = keyMap[lowerLetter];
-
-    if (keyAccidental) {
-      return `${lowerLetter}${keyAccidental}/${octave}`;
-    }
-
-    return `${lowerLetter}/${octave}`;
-  }
-  function yToPitch(y: number) {
-    const topStaffLineY = topStaffLineYRef.current;
-    const bottomStaffLineY = bottomStaffLineYRef.current;
-
-    // There are 4 gaps between the 5 staff lines.
-    const staffLineSpacing = (bottomStaffLineY - topStaffLineY) / 4;
-
-    // One pitch step is line-to-space or space-to-line.
-    const pitchStep = staffLineSpacing / 2;
-
-    // In treble clef:
-    // f/5 is the top staff line.
-    // c/6 is four pitch steps above f/5:
-    // f/5 -> g/5 -> a/5 -> b/5 -> c/6
-    const firstPitchY = topStaffLineY - 4 * pitchStep;
-
-    // Browser y gets bigger as you move down.
-    // Our pitch array also goes from high to low.
-    const index = Math.round((y - firstPitchY) / pitchStep);
-
-    const clampedIndex = Math.max(
-      0,
-      Math.min(PITCHES_TOP_TO_BOTTOM.length - 1, index),
-    );
-
-    return PITCHES_TOP_TO_BOTTOM[clampedIndex];
   }
 
   // Calls the server-side Groq route. When a current progression is supplied the
