@@ -271,10 +271,7 @@ This is intentionally narrower than a general-purpose operation engine.
 ### 5.1 First-class candidate state
 
 ```ts
-type CandidateRole =
-  | "closest"
-  | "moderate"
-  | "distinct";
+type CandidateRole = "closest" | "moderate" | "distinct";
 
 type ProgressionCandidate = {
   id: string;
@@ -698,18 +695,18 @@ type ParsedStyleLanguage = {
 
 ### 10.2 Valence examples
 
-| User phrase | Normalized result |
-|---|---|
-| “slightly jazzy” | jazz, intensity 1 |
-| “jazzy” | jazz, intensity 2 |
-| “very/really/super jazzy” | jazz, intensity 3 |
-| “as jazzy as possible” | jazz, intensity 4 |
-| “a little simpler” | simple, intensity 1 |
-| “make it much simpler” | simple, intensity 3 |
+| User phrase                     | Normalized result   |
+| ------------------------------- | ------------------- |
+| “slightly jazzy”                | jazz, intensity 1   |
+| “jazzy”                         | jazz, intensity 2   |
+| “very/really/super jazzy”       | jazz, intensity 3   |
+| “as jazzy as possible”          | jazz, intensity 4   |
+| “a little simpler”              | simple, intensity 1 |
+| “make it much simpler”          | simple, intensity 3 |
 | “make it as simple as possible” | simple, intensity 4 |
-| “make it jazzier” | jazz, increase 1 |
-| “make it way jazzier” | jazz, increase 2 |
-| “less jazzy” | jazz, decrease 1 |
+| “make it jazzier”               | jazz, increase 1    |
+| “make it way jazzier”           | jazz, increase 2    |
+| “less jazzy”                    | jazz, decrease 1    |
 
 ### 10.3 Conversational negation
 
@@ -773,7 +770,12 @@ type ExactEdit =
     }
   | {
       type: "set_progression";
-      chords: [ParsedChordSymbol, ParsedChordSymbol, ParsedChordSymbol, ParsedChordSymbol];
+      chords: [
+        ParsedChordSymbol,
+        ParsedChordSymbol,
+        ParsedChordSymbol,
+        ParsedChordSymbol,
+      ];
     }
   | {
       type: "copy_measure_chord";
@@ -853,14 +855,14 @@ The exact edit is not permanent after selection. It is simply part of the select
 
 ### Distinguishing phrases
 
-| Phrase | Mode |
-|---|---|
-| “Make this jazzier” | revise existing |
-| “Give me a new jazzy progression” | generate new |
-| “Try another one” | generate new |
+| Phrase                               | Mode            |
+| ------------------------------------ | --------------- |
+| “Make this jazzier”                  | revise existing |
+| “Give me a new jazzy progression”    | generate new    |
+| “Try another one”                    | generate new    |
 | “Keep the same feel but simplify it” | revise existing |
-| “Start over with something simple” | generate new |
-| “Make it slightly different” | revise existing |
+| “Start over with something simple”   | generate new    |
+| “Make it slightly different”         | revise existing |
 
 ---
 
@@ -1504,3 +1506,9 @@ The candidate-preview milestone is complete when:
 - no partial multi-clause execution occurs;
 - no success message contradicts the final progression;
 - every implementation phase exists as a small understandable commit.
+
+# some notes from the human...
+
+this is a really long planning doc for a lot of future functionality that is not close to ready yet. after you have read this, evaluate what about this preposed plan could work and what certainly wont. what are the limitations of my current structure? what files might need to be split or added to accomodate these changes eventually? where are thinks right not a bit slow or stale? my POST requests for simple edits have been taking 15-30 seconds, why is that? how to I prevent that from happening. and how might i go about optimizing the groq prompt so that i give it enough information to make a decision, but not so much that i overload such a cheap model. do you have any propositions for changes in the architecture, scaffold, logic? can you identify any places that logic will be/is currently duplicated and can be condensed?
+
+do not commit anything. do not change anything. any changes will be explicitly asked for in small, concrete steps, verified with tests, and not touch more than 5 files at a time.
