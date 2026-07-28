@@ -18,7 +18,6 @@ import { getGenerationKey } from "../music/keyDetection";
 import {
   DURATION_TO_SLOTS,
   KEY_SIGNATURE_ACCIDENTALS,
-  parsePitchToMidi,
   PITCHES_TOP_TO_BOTTOM,
 } from "../music/noteUtils";
 import { getStaffGeometry } from "./chord-finder/staffGeometry";
@@ -42,6 +41,10 @@ import type {
   StyleOption,
 } from "../music/types";
 import {
+  buildExplanationRequest,
+  type ExplanationRequest,
+} from "./chord-finder/explanationRequest";
+import {
   DEFAULT_INTERPRETED_STYLE,
   type HarmonyRouterResponse,
   type InterpretedStyle,
@@ -50,7 +53,6 @@ import {
 } from "../ai/types";
 import { toGenerationPreferences } from "../ai/toGenerationPreferences";
 import {
-  buildExplanationIdentityItems,
   buildProgressionIdentityItems,
   type CurrentProgressionItem,
 } from "../music/progressionPresentation";
@@ -63,20 +65,6 @@ type AiProgressionExplanation = {
     measure: number;
     chord: string;
     explanation: string;
-  }>;
-};
-
-type ExplanationRequest = {
-  activeKey: string;
-  key: string;
-  styleRequest: string;
-  styleSummary: string;
-  progression: Array<{
-    measure: number;
-    symbol: string;
-    romanNumeral: string;
-    score?: number;
-    reasons: string[];
   }>;
 };
 
@@ -110,42 +98,6 @@ function getEffectiveStyle(
 // mode so "A minor" stays unambiguous.
 function formatKeyForHeading(keyLabel: string) {
   return keyLabel.replace(/\s+major$/i, "");
-}
-
-function getVoicedBassMidiSequence(voicedProgression: PlacedChord[][]) {
-  return voicedProgression.map((measure) => {
-    const bassPitch = measure[0]?.pitches[0];
-    return bassPitch ? (parsePitchToMidi(bassPitch) ?? null) : null;
-  });
-}
-
-function reasonClaimsDescendingBass(reason: string) {
-  return /\b(descending bass|bass line|bassline|bass downward|stepwise bass motion)\b/i.test(
-    reason,
-  );
-}
-
-function getGroundedExplanationReasons(
-  scoredChord: ScoredChord,
-  measureIndex: number,
-  bassMidiSequence: Array<number | null>,
-) {
-  const currentBass = bassMidiSequence[measureIndex];
-  const previousBass =
-    measureIndex > 0 ? bassMidiSequence[measureIndex - 1] : null;
-  const bassDescends =
-    currentBass !== null && previousBass !== null && currentBass < previousBass;
-  const reasons = scoredChord.reasons.filter(
-    (reason) => bassDescends || !reasonClaimsDescendingBass(reason),
-  );
-
-  if (bassDescends) {
-    reasons.push(
-      `The final voiced bass moves downward from MIDI ${previousBass} to ${currentBass}.`,
-    );
-  }
-
-  return reasons;
 }
 
 export default function Staff() {
@@ -647,35 +599,6 @@ export default function Staff() {
     }
   }
 
-  function buildExplanationRequest(
-    finalProgression: ScoredChord[],
-    voicedProgression: PlacedChord[][],
-    keyLabel: string,
-    styleRequest: string,
-    styleSummary: string,
-  ): ExplanationRequest | null {
-    if (finalProgression.length === 0) return null;
-
-    const bassMidiSequence = getVoicedBassMidiSequence(voicedProgression);
-    const identities = buildExplanationIdentityItems(finalProgression);
-
-    return {
-      activeKey: keyLabel,
-      key: keyLabel,
-      styleRequest,
-      styleSummary,
-      progression: finalProgression.map((scoredChord, index) => ({
-        ...identities[index],
-        score: scoredChord.score,
-        reasons: getGroundedExplanationReasons(
-          scoredChord,
-          index,
-          bassMidiSequence,
-        ),
-      })),
-    };
-  }
-
   function renderProgression(
     finalProgression: ScoredChord[],
     keyLabel: string,
@@ -934,7 +857,8 @@ export default function Staff() {
       getRenderedPitch,
     );
     const activeInterpretation = aiInterpretation ?? DEFAULT_INTERPRETED_STYLE;
-    const effectiveStyle = activeInterpretation.primaryStyle ?? BLANK_PROMPT_STYLE;
+    const effectiveStyle =
+      activeInterpretation.primaryStyle ?? BLANK_PROMPT_STYLE;
     const effectivePreferences: GenerationPreferences = {
       ...toGenerationPreferences(activeInterpretation),
       style: effectiveStyle,
@@ -1028,7 +952,9 @@ export default function Staff() {
     // Record the user's turn in the conversation, then clear the input so the
     // chat reads as a back-and-forth. A blank prompt means "best fit for me".
     pushUserMessage(
-      normalizedPrompt === "" ? "Generate a progression" : normalizedPrompt,
+      normalizedPrompt === ""
+        ? "Generate best-fit progression"
+        : normalizedPrompt,
     );
     setStylePrompt("");
 
@@ -1289,9 +1215,7 @@ export default function Staff() {
         messages={messages}
         onComposerChange={setStylePrompt}
         onSubmit={handleGenerateProgression}
-        placeholder={
-          hasProgression ? REVISION_PLACEHOLDER : FRESH_PLACEHOLDER
-        }
+        placeholder={hasProgression ? REVISION_PLACEHOLDER : FRESH_PLACEHOLDER}
       />
     </div>
   );
