@@ -1,14 +1,17 @@
 # Chord Finder
 
-Compose a melody on a staff and let Chord Finder generate a four-measure chord progression to go with it — then hear it played back. Each generated chord comes with a plain-language explanation of *why* it was chosen.
+Chord Finder is an interactive harmony tool for turning a short melody into a playable four-measure chord progression. Write on the staff, generate harmony that fits, refine it in plain language, and hear the result.
 
 ## Features
 
-- **Click-to-place notation** — add notes and rests (whole/half/quarter/eighth) with accidentals on a treble staff, rendered with [VexFlow](https://github.com/0xfe/vexflow).
-- **Automatic chord generation** — a music-theory engine builds diatonic chord candidates (triads, 7ths, sus, add9, inversions), scores them against your melody, key, and a chosen style, and searches for the best-fitting progression.
-- **Key & style control** — pick a key signature, generation mode (automatic / major / minor), and a style: simple, jazzy, bluesy, or descending bass.
-- **"Why these chords?"** — every chord is annotated with its score and the reasoning behind it.
-- **Playback** — hear the melody and chords together with an adjustable BPM, powered by [Tone.js](https://tonejs.github.io/).
+- Compose a four-measure melody in 4/4 using whole, half, quarter, and eighth notes or rests.
+- Add sharps, flats, and naturals, then choose a key signature and automatic, major, or minor mode.
+- Generate a best-fit progression with a deterministic music-theory engine.
+- Describe a style or mood in plain language, including jazz, blues, complexity, cadence, and bass-motion preferences.
+- Revise an existing progression conversationally or make exact edits such as replacing or copying a chord.
+- Ask for a plain-English explanation of the current progression.
+- View chord symbols and Roman numerals alongside standard notation.
+- Play the melody and chords together at an adjustable tempo.
 
 ## Getting Started
 
@@ -17,30 +20,34 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open [http://localhost:3000](http://localhost:3000).
 
-To create a production build:
+Best-fit generation works locally without an AI service. To enable natural-language requests, revisions, and explanations, add a Groq API key to `.env.local`:
 
-```bash
-npm run build
-npm start
+```env
+GROQ_API_KEY=your_api_key
+# Optional
+GROQ_MODEL=llama-3.1-8b-instant
 ```
 
-## How It Works
+## Usage
 
-The app is organized into three layers:
+1. Select a note or rest duration and click the staff to build a melody.
+2. Choose the key, mode, and tempo.
+3. Leave the harmony request blank for the best fit, or describe the sound you want.
+4. Refine the result with requests such as `make it jazzier` or `replace measure 2 with Am7`.
+5. Press **Play** to hear the melody and progression together.
 
-- **UI** (`src/components/Staff.tsx`) — the interactive staff, toolbar, and rendering via VexFlow.
-- **Music engine** (`src/music/`) — pure TypeScript with no React dependency:
-  - `keyDetection.ts` — infers the key from your melody.
-  - `chords.ts` — builds every diatonic chord candidate for a key.
-  - `chordScoring.ts` — scores each chord on melody fit, key fit, style, and progression.
-  - `chordGeneration.ts` — searches and ranks four-chord paths to choose a progression.
-  - `noteUtils.ts` / `types.ts` — pitch math, voicing, and shared types.
-- **Audio** (`src/audio/playback.ts`) — schedules and plays melody + chords with Tone.js.
+## Commands
 
-Songs are fixed to four measures in 4/4 time.
+```bash
+npm run dev      # Start the development server
+npm run build    # Create a production build
+npm start        # Run the production server
+npm run lint     # Run ESLint
+npm test         # Run the test suite
+```
 
 ## Tech Stack
 
-Next.js 16 · React 19 · TypeScript · Tailwind CSS · VexFlow · Tone.js
+Next.js 16, React 19, TypeScript, Tailwind CSS, VexFlow, Tone.js, Groq, and Vitest.
