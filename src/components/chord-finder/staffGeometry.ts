@@ -7,6 +7,7 @@ export const BASE_MEASURE_WIDTH = 300;
 export const BASE_FIRST_MEASURE_EXTRA = 90;
 export const MEASURE_COUNT = 4;
 export const RENDERER_HEIGHT = 310;
+export type StaffGeometry = ReturnType<typeof getStaffGeometry>;
 
 export function getStaffGeometry(keySignature: string) {
   const firstMeasureExtra =
