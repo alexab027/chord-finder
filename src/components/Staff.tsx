@@ -20,7 +20,10 @@ import {
   KEY_SIGNATURE_ACCIDENTALS,
   PITCHES_TOP_TO_BOTTOM,
 } from "../music/noteUtils";
-import { getStaffGeometry } from "./chord-finder/staffGeometry";
+import {
+  getStaffGeometry,
+  getMeasureInfoFromClick,
+} from "./chord-finder/staffGeometry";
 import { voiceProgression } from "../music/voicing";
 import {
   applyChordEdit,
@@ -368,38 +371,6 @@ export default function Staff() {
     return nextSlot;
   }
 
-  function getMeasureInfoFromClick(clickX: number) {
-    const measureStarts = [
-      staffX,
-      staffX + baseMeasureWidth + firstMeasureExtra,
-      staffX + baseMeasureWidth + firstMeasureExtra + baseMeasureWidth,
-      staffX + baseMeasureWidth + firstMeasureExtra + baseMeasureWidth * 2,
-    ];
-
-    const measureWidths = [
-      baseMeasureWidth + firstMeasureExtra,
-      baseMeasureWidth,
-      baseMeasureWidth,
-      baseMeasureWidth,
-    ];
-
-    for (let i = 0; i < 4; i++) {
-      const startX = measureStarts[i];
-      const endX = startX + measureWidths[i];
-
-      if (clickX >= startX && clickX <= endX) {
-        return {
-          measureIndex: i,
-          startX,
-          endX,
-          width: measureWidths[i],
-        };
-      }
-    }
-
-    return null;
-  }
-
   function handleStaffClick(event: React.MouseEvent<HTMLDivElement>) {
     if (!staffWrapperRef.current) return;
 
@@ -415,7 +386,7 @@ export default function Staff() {
       return;
     }
 
-    const measureInfo = getMeasureInfoFromClick(clickX);
+    const measureInfo = getMeasureInfoFromClick(clickX, firstMeasureExtra);
 
     if (!measureInfo) return;
 

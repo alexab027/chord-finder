@@ -25,3 +25,37 @@ export function getStaffGeometry(keySignature: string) {
     rendererHeight: RENDERER_HEIGHT,
   };
 }
+export function getMeasureInfoFromClick(
+  clickX: number,
+  firstMeasureExtra: number,
+) {
+  const measureStarts = [
+    STAFF_X,
+    STAFF_X + BASE_MEASURE_WIDTH + firstMeasureExtra,
+    STAFF_X + BASE_MEASURE_WIDTH + firstMeasureExtra + BASE_MEASURE_WIDTH,
+    STAFF_X + BASE_MEASURE_WIDTH + firstMeasureExtra + BASE_MEASURE_WIDTH * 2,
+  ];
+
+  const measureWidths = [
+    BASE_MEASURE_WIDTH + firstMeasureExtra,
+    BASE_MEASURE_WIDTH,
+    BASE_MEASURE_WIDTH,
+    BASE_MEASURE_WIDTH,
+  ];
+
+  for (let i = 0; i < 4; i++) {
+    const startX = measureStarts[i];
+    const endX = startX + measureWidths[i];
+
+    if (clickX >= startX && clickX <= endX) {
+      return {
+        measureIndex: i,
+        startX,
+        endX,
+        width: measureWidths[i],
+      };
+    }
+  }
+
+  return null;
+}
