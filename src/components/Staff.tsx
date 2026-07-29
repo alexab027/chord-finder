@@ -18,7 +18,7 @@ import {
   type ChordEditAction,
 } from "../harmony/actions";
 import { parsePureDirectEdits } from "../harmony/directEditParser";
-import { applyHarmonyPreferencePatch } from "../harmony/preferences";
+import { resolveHarmonyPreferences } from "../harmony/preferences";
 import { useHarmonyMessages } from "./chord-finder/useHarmonyMessages";
 import type {
   DurationName,
@@ -366,24 +366,19 @@ export default function Staff() {
     const requestedActions = data.actions ?? [];
 
     if (requestedActions.length > 0) {
-      const effectiveStyle =
-        aiInterpretation?.primaryStyle ?? BLANK_PROMPT_STYLE;
-      // Apply only the returned preference patch to the current active
-      // preferences so a combined request (deterministic chord actions plus an
-      // explicit style/preference change like "make it jazzier") applies both.
-      // Unrelated preferences are preserved by applyHarmonyPreferencePatch.
-      const activePreferences = toGenerationPreferences(
-        aiInterpretation ?? DEFAULT_INTERPRETED_STYLE,
-      );
-      const effectivePreferences: GenerationPreferences = {
-        ...applyHarmonyPreferencePatch(
-          activePreferences,
-          data.revision?.requestedChanges ?? {},
-        ),
-        style: effectiveStyle,
-      };
       const baseInterpretationForActions =
         aiInterpretation ?? DEFAULT_INTERPRETED_STYLE;
+      const activePreferences = toGenerationPreferences(
+        baseInterpretationForActions,
+      );
+      const effectivePreferences = resolveHarmonyPreferences(
+        activePreferences,
+        {
+          patch: data.revision?.requestedChanges,
+        },
+      );
+
+      const effectiveStyle = effectivePreferences.style;
       const appliedInterpretation: InterpretedStyle = {
         ...baseInterpretationForActions,
         primaryStyle: effectiveStyle,
@@ -423,18 +418,23 @@ export default function Staff() {
       changeAmount: 0.3,
       requestedChanges: {},
     };
-    const applied = applyHarmonyPreferencePatch(
+    const resolvedPreferences = resolveHarmonyPreferences(
       toGenerationPreferences(baseInterpretation),
-      revisionIntent.requestedChanges,
+      {
+        style: data.primaryStyle,
+        patch: revisionIntent.requestedChanges,
+      },
     );
-    const effectiveStyle = baseInterpretation.primaryStyle;
+
     const effectivePreferences: GenerationPreferences = {
-      ...applied,
-      style: effectiveStyle,
+      ...resolvedPreferences,
       descendingBassWeight: asksForExplicitDescendingBass(normalizedPrompt)
         ? 1
-        : applied.descendingBassWeight,
+        : resolvedPreferences.descendingBassWeight,
     };
+
+    const effectiveStyle = effectivePreferences.style;
+
     const revision: RevisionContext = {
       targets: previousProgression.map((scoredChord) => ({
         degree: scoredChord.chord.degree,

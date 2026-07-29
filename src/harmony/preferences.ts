@@ -1,4 +1,4 @@
-import type { HarmonyPreferences } from "../music/types";
+import type { HarmonyPreferences, StyleOption } from "../music/types";
 
 export const DEFAULT_HARMONY_SUMMARY =
   "Use a clear, consonant progression with a strong resolution.";
@@ -30,19 +30,34 @@ function clampPreference(value: number) {
 
 export function applyHarmonyPreferencePatch(
   base: HarmonyPreferences,
-  patch: HarmonyPreferencePatch
+  patch: HarmonyPreferencePatch,
 ): HarmonyPreferences {
   return {
     ...base,
     descendingBassWeight: clampPreference(
-      base.descendingBassWeight + (patch.descendingBassDelta ?? 0)
+      base.descendingBassWeight + (patch.descendingBassDelta ?? 0),
     ),
     complexity: clampPreference(base.complexity + (patch.complexityDelta ?? 0)),
     dissonanceTolerance: clampPreference(
-      base.dissonanceTolerance + (patch.dissonanceDelta ?? 0)
+      base.dissonanceTolerance + (patch.dissonanceDelta ?? 0),
     ),
     cadenceStrength: clampPreference(
-      base.cadenceStrength + (patch.cadenceDelta ?? 0)
+      base.cadenceStrength + (patch.cadenceDelta ?? 0),
     ),
+  };
+}
+
+export type ResolveHarmonyPreferencesOptions = {
+  style?: StyleOption;
+  patch?: HarmonyPreferencePatch;
+};
+
+export function resolveHarmonyPreferences(
+  base: HarmonyPreferences,
+  options: ResolveHarmonyPreferencesOptions = {},
+): HarmonyPreferences {
+  return {
+    ...applyHarmonyPreferencePatch(base, options.patch ?? {}),
+    style: options.style ?? base.style,
   };
 }

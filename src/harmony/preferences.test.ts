@@ -5,11 +5,12 @@ import {
   applyHarmonyPreferencePatch,
   DEFAULT_HARMONY_PROFILE,
 } from "./preferences";
+import { resolveHarmonyPreferences } from "../harmony/preferences";
 
 describe("default harmony profile", () => {
   it("blank interpretation defaults to the centralized high-consonance profile", () => {
     expect(toGenerationPreferences(DEFAULT_INTERPRETED_STYLE)).toEqual(
-      DEFAULT_HARMONY_PROFILE
+      DEFAULT_HARMONY_PROFILE,
     );
     expect(DEFAULT_HARMONY_PROFILE.melodyFitPriority).toBe(1);
     expect(DEFAULT_HARMONY_PROFILE.consonancePriority).toBe(0.9);
@@ -31,7 +32,7 @@ describe("default harmony profile", () => {
     expect(explicit.dissonanceTolerance).toBe(0.45);
     expect(explicit.preferSevenths).toBe(true);
     expect(explicit.melodyFitPriority).toBe(
-      DEFAULT_HARMONY_PROFILE.melodyFitPriority
+      DEFAULT_HARMONY_PROFILE.melodyFitPriority,
     );
   });
 
@@ -42,11 +43,11 @@ describe("default harmony profile", () => {
 
     expect(patched.complexity).toBeCloseTo(0.45);
     expect(patched.dissonanceTolerance).toBe(
-      DEFAULT_HARMONY_PROFILE.dissonanceTolerance
+      DEFAULT_HARMONY_PROFILE.dissonanceTolerance,
     );
     expect(patched.preferSevenths).toBe(DEFAULT_HARMONY_PROFILE.preferSevenths);
     expect(patched.descendingBassWeight).toBe(
-      DEFAULT_HARMONY_PROFILE.descendingBassWeight
+      DEFAULT_HARMONY_PROFILE.descendingBassWeight,
     );
   });
 
@@ -72,10 +73,36 @@ describe("default harmony profile", () => {
     expect(patched.voiceLeadingPriority).toBe(0.6);
     expect(patched.preferSevenths).toBe(true);
     expect(patched.dissonanceTolerance).toBe(
-      activePreferences.dissonanceTolerance
+      activePreferences.dissonanceTolerance,
     );
   });
+  it("applies an interpreted jazzy style to a creative revision", () => {
+    const resolved = resolveHarmonyPreferences(DEFAULT_HARMONY_PROFILE, {
+      style: "jazzy",
+    });
 
+    expect(resolved.style).toBe("jazzy");
+  });
+
+  it("switches a jazzy progression back to simple", () => {
+    const resolved = resolveHarmonyPreferences(
+      { ...DEFAULT_HARMONY_PROFILE, style: "jazzy" },
+      { style: "simple" },
+    );
+
+    expect(resolved.style).toBe("simple");
+  });
+
+  it("preserves the active style when no style change is supplied", () => {
+    const resolved = resolveHarmonyPreferences(
+      { ...DEFAULT_HARMONY_PROFILE, style: "jazzy" },
+      {
+        patch: { complexityDelta: 0.2 },
+      },
+    );
+
+    expect(resolved.style).toBe("jazzy");
+  });
   // Mirrors the "replace chord 3 with Dm7 and use descending bass" case: the
   // style is handled separately, so the returned preference patch is empty and
   // must leave the active numeric preferences untouched.
@@ -87,7 +114,7 @@ describe("default harmony profile", () => {
     });
 
     expect(applyHarmonyPreferencePatch(activePreferences, {})).toEqual(
-      activePreferences
+      activePreferences,
     );
   });
 });
