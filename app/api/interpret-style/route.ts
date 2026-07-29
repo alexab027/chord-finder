@@ -73,22 +73,39 @@ Rules:
 - "confidence" must be a number between 0 and 1.
 - "primaryStyle" must be exactly one of: "simple", "jazzy". Use no other value.
 - Do not generate a progression. Do not invent chord names for generation or revision; for answer_question, you may repeat absolute chord symbols supplied in currentProgression.
-- Explicit generation verbs strongly imply "generate_new": "make", "generate", "create", "give me", "start over", "new progression", "make me a progression", "make a new progression", and "generate a progression" are "generate_new" unless the user clearly asks to change the existing progression.
-- Use "generate_new" when the user asks for a new progression, a different style, to start over, or asks broadly for "make me" / "give me" harmony.
+- Use "generate_new" when the user explicitly requests a new progression:
+  "generate a progression", "make me a progression", "give me a new
+  progression", "start over", or "something completely different".
+- The word "make" alone does not imply generate_new.
+- When hasExistingProgression is true, phrases such as "make it simple",
+  "make it simpler", "make this jazzy", and "make it jazzier" mean
+  revise_existing.
+- Comparative style words ending in "-er", such as "simpler" and "jazzier",
+  mean revise_existing unless the user explicitly requests a new or completely
+  different progression.
 - If pendingClarification exists, the latest user message resolves it. If the latest message says "new progression", "make a new progression", "generate one", "start over", or similar, return "generate_new" even if the original ambiguous request could have been a revision.
 - Use "revise_existing" when the user asks to change the currently displayed progression or an explicitly numbered chord.
 - If pendingClarification exists and the latest user message says "existing progression", "the current progression", "that progression", or names a concrete existing-progression edit, return "revise_existing".
 - If the user asks to transpose "the entire progression" or "the whole progression", the target is not ambiguous; however transposition actions are not supported yet, so return "clarify" with a focused message saying progression transposition is not supported yet. Do not ask whether they meant one chord.
 - If the user says "current chord" or "selected chord", return "clarify" asking which chord/measure because this app has no selected chord state.
 - If the user asks to make the progression major/minor or change key/mode through chat (e.g. "make it a major progression"), return "clarify" explaining key/mode changes are not supported through this request yet and asking whether they want to use the mode control or generate a new progression with the current active key.
-- Use "clarify" only when two or more materially different musical interpretations remain plausible after considering the latest user message, current progression, and pending clarification.
+- Use "clarify" when:
+  - two or more materially different musical interpretations remain plausible;
+  - an exact edit is missing a chord, measure, or other required value;
+  - two exact edits conflict by assigning different results to the same measure;
+  - any requested clause uses an unsupported operation;
+  - any meaningful clause cannot be represented by the returned revision and actions.
+- Every meaningful clause must be represented by the intent, revision, or actions.
+- If any clause is unsupported, invalid, conflicting, or unhandled, return
+  "clarify" with "actions": []. Never execute only the supported part of a
+  multi-clause request.
 - Use "answer_question" when the user asks about the current progression and no musical change should happen.
 - If the user asks to revise an existing progression but none exists, still classify as "revise_existing"; the application will guard it.
 - For "clarify", include a concise "clarificationQuestion".
 - For "answer_question", include a concise "assistantMessage". If there is no progression context, say that there is not enough progression to answer.
 - For "answer_question", use currentProgression.absoluteSymbol for ordinary chord names and currentProgression.romanNumeral for harmonic function. Both are trusted application context.
 - Distinguish harmonic transposition from voicing movement. "Transpose up two" is ambiguous; return "clarify". Do not return unsupported transposition or voicing actions.
-- Do not return a revision action unless it is supported by the exact chord edits schema below.
+- Do not return an exact-edit action unless it is supported by the exact chord edits schema below.
 - Map simple / pop / clean / basic language toward "simple".
 - Map jazz / lush / sophisticated / colorful language toward "jazzy".
 - For explicit "descending bass", "descending bass line", or "descending bassline" requests, set "descendingBassWeight" to 1.0.
@@ -153,7 +170,26 @@ function clampDelta(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   return Math.min(1, Math.max(-1, value));
 }
+function asksForExplicitNewProgression(prompt: string) {
+  return (
+    /\bnew progression\b/i.test(prompt) ||
+    /\bstart over\b/i.test(prompt) ||
+    /\bsomething completely different\b/i.test(prompt) ||
+    /\bgenerate one\b/i.test(prompt) ||
+    /\bmake me a progression\b/i.test(prompt)
+  );
+}
+function isExistingStyleRevision(
+  prompt: string,
+  hasExistingProgression: boolean,
+) {
+  if (!hasExistingProgression) return false;
+  if (asksForExplicitNewProgression(prompt)) return false;
 
+  return /\bmake\s+(?:it|this|that)\s+(?:simple|simpler|jazzy|jazzier)\b/i.test(
+    prompt,
+  );
+}
 export function sanitizeCurrentProgression(
   value: unknown,
 ): CurrentProgressionItem[] {
@@ -503,34 +539,49 @@ function isIntInRange(
   );
 }
 
-// Validates the model's exact-edit actions into a clean, typed list. Each action
-// is rebuilt from known fields only (so unknown fields are dropped), and any
-// action that fails validation or has an unknown type is skipped rather than
-// passed through. Never fabricates an action the model did not return.
-function sanitizeActions(value: unknown): ChordEditAction[] {
-  if (!Array.isArray(value)) return [];
+// Validates every model action and rebuilds it from known fields.
+// If any action is malformed, unsupported, or truncated, rejected is true so
+// the request can clarify without applying only part of the requested edits.
+type SanitizedActionsResult = {
+  actions: ChordEditAction[];
+  rejected: boolean;
+};
+
+function sanitizeActions(value: unknown): SanitizedActionsResult {
+  if (!Array.isArray(value)) {
+    return { actions: [], rejected: true };
+  }
 
   const actions: ChordEditAction[] = [];
+  let rejected = value.length > MAX_ACTIONS;
 
   for (const raw of value.slice(0, MAX_ACTIONS)) {
-    const item = (raw ?? {}) as Record<string, unknown>;
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      rejected = true;
+      continue;
+    }
+
+    const item = raw as Record<string, unknown>;
 
     if (item.type === "set_chord") {
-      if (!isIntInRange(item.measure, 1, STAFF_MEASURE_COUNT)) continue;
-      if (!isIntInRange(item.degree, 1, 7)) continue;
       if (
+        !isIntInRange(item.measure, 1, STAFF_MEASURE_COUNT) ||
+        !isIntInRange(item.degree, 1, 7) ||
         typeof item.quality !== "string" ||
         !ALLOWED_QUALITIES.includes(item.quality as HarmonyChordQuality)
       ) {
+        rejected = true;
         continue;
       }
-      // extension may only be omitted/null or exactly 7.
+
       let extension: 7 | undefined;
+
       if (item.extension === undefined || item.extension === null) {
         extension = undefined;
       } else if (item.extension === 7) {
         extension = 7;
       } else {
+        rejected = true;
         continue;
       }
 
@@ -541,21 +592,46 @@ function sanitizeActions(value: unknown): ChordEditAction[] {
         quality: item.quality as HarmonyChordQuality,
         ...(extension === 7 ? { extension } : {}),
       });
-    } else if (item.type === "copy_chord") {
-      if (!isIntInRange(item.fromMeasure, 1, STAFF_MEASURE_COUNT)) continue;
-      if (!isIntInRange(item.toMeasure, 1, STAFF_MEASURE_COUNT)) continue;
-      if (item.fromMeasure === item.toMeasure) continue;
+
+      continue;
+    }
+
+    if (item.type === "copy_chord") {
+      if (
+        !isIntInRange(item.fromMeasure, 1, STAFF_MEASURE_COUNT) ||
+        !isIntInRange(item.toMeasure, 1, STAFF_MEASURE_COUNT) ||
+        item.fromMeasure === item.toMeasure
+      ) {
+        rejected = true;
+        continue;
+      }
 
       actions.push({
         type: "copy_chord",
         fromMeasure: item.fromMeasure,
         toMeasure: item.toMeasure,
       });
-    } else if (item.type === "replace_chord") {
-      if (!isIntInRange(item.measure, 1, STAFF_MEASURE_COUNT)) continue;
-      if (typeof item.chordName !== "string") continue;
-      const chordName = item.chordName.trim().slice(0, MAX_SYMBOL_LENGTH);
-      if (!isValidChordName(chordName)) {
+
+      continue;
+    }
+
+    if (item.type === "replace_chord") {
+      if (
+        !isIntInRange(item.measure, 1, STAFF_MEASURE_COUNT) ||
+        typeof item.chordName !== "string"
+      ) {
+        rejected = true;
+        continue;
+      }
+
+      const chordName = item.chordName.trim();
+
+      if (
+        chordName.length === 0 ||
+        chordName.length > MAX_SYMBOL_LENGTH ||
+        !isValidChordName(chordName)
+      ) {
+        rejected = true;
         continue;
       }
 
@@ -564,11 +640,15 @@ function sanitizeActions(value: unknown): ChordEditAction[] {
         measure: item.measure,
         chordName,
       });
+
+      continue;
     }
-    // Unknown action types are ignored.
+
+    // Missing, non-string, and unsupported action types are rejected.
+    rejected = true;
   }
 
-  return actions;
+  return { actions, rejected };
 }
 
 function asBoolean(value: unknown, fallback: boolean): boolean {
@@ -884,30 +964,50 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const interpretation = sanitizeInterpretation(parsed);
+
     if (asksForExplicitDescendingBass(prompt)) {
       interpretation.descendingBassWeight = 1;
     }
+
+    const confidence = clamp01(parsed.confidence, 0.5);
+
     const unsupportedActions = unsupportedActionTypes(parsed.actions);
+
     if (unsupportedActions.length > 0) {
       return json({
         ...interpretation,
         intent: "clarify",
-        confidence: 1,
+        confidence,
         actions: [],
         clarificationQuestion: `I cannot apply unsupported action "${unsupportedActions[0]}" yet, so I did not change the chords.`,
       });
     }
 
+    const sanitizedActions = sanitizeActions(parsed.actions);
+
+    if (sanitizedActions.rejected) {
+      return json({
+        ...interpretation,
+        intent: "clarify",
+        confidence,
+        actions: [],
+        clarificationQuestion:
+          "I could not safely apply every requested edit. Could you rephrase the complete request?",
+      });
+    }
+
     const actions = mergeExplicitCopyActions(
       mergeLiteralReplaceActions(
-        sanitizeActions(parsed.actions),
+        sanitizedActions.actions,
         extractValidatedReplaceActions(prompt),
       ),
       extractExplicitCopyActions(prompt),
     );
-    const intent = asIntent(parsed.intent);
-    const confidence = clamp01(parsed.confidence, 0.5);
 
+    const modelIntent = asIntent(parsed.intent);
+    const intent = isExistingStyleRevision(prompt, hasExistingProgression)
+      ? "revise_existing"
+      : modelIntent;
     if (!intent) {
       return json({
         ...interpretation,
