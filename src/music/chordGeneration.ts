@@ -35,7 +35,7 @@ const CHORD_TRANSITIONS: Record<KeyMode, Record<number, number[]>> = {
 };
 
 //ranks the transitions, rankings may change as user preference is updated
-//future: plan to add helper fn that changes rankings based on user preference for 
+//future: plan to add helper fn that changes rankings based on user preference for
 // commonality vs surprise, and also add some less common transitions to the list
 const TRANSITION_SCORES: Record<KeyMode, Record<string, number>> = {
   major: {
@@ -70,13 +70,11 @@ const MELODY_WEIGHT = 1.3;
 const TRANSITION_WEIGHT = 1.0;
 const CADENCE_WEIGHT = 1.0;
 const OPENING_TONIC_BONUS = 2;
-const DEFAULT_BASS_OCTAVE = 3;
-const NARROW_DESCENDING_BASS_WEIGHT = 2;
 
 function buildChordPaths(
   mode: KeyMode,
   currentPath: number[],
-  targetLength: number
+  targetLength: number,
 ): number[][] {
   if (currentPath.length === targetLength) {
     return [currentPath];
@@ -86,29 +84,12 @@ function buildChordPaths(
   const nextDegrees = CHORD_TRANSITIONS[mode][currentDegree] ?? [];
 
   return nextDegrees.flatMap((nextDegree) =>
-    buildChordPaths(mode, [...currentPath, nextDegree], targetLength)
+    buildChordPaths(mode, [...currentPath, nextDegree], targetLength),
   );
 }
 
 function getChordCandidatesForDegree(chords: ChordCandidate[], degree: number) {
   return chords.filter((chord) => chord.degree === degree);
-}
-
-function getPlannedBassMidi(
-  candidate: ChordCandidate,
-  previousBassMidi?: number
-) {
-  let bassMidi = candidate.bassPc + 12 * DEFAULT_BASS_OCTAVE;
-
-  while (
-    previousBassMidi !== undefined &&
-    bassMidi >= previousBassMidi &&
-    bassMidi >= 12
-  ) {
-    bassMidi -= 12;
-  }
-
-  return bassMidi;
 }
 
 function getBestScoredChordForMeasure(
@@ -122,7 +103,6 @@ function getBestScoredChordForMeasure(
     measureCount: number;
     getRenderedPitchFn: (note: PlacedNote) => string;
     previousChord?: ChordCandidate;
-    previousBassMidi?: number;
     preferences?: GenerationPreferences;
     revision?: {
       preserveOverallProgression: boolean;
@@ -130,54 +110,14 @@ function getBestScoredChordForMeasure(
     };
     revisionTarget?: RevisionChordTarget;
     revisionLocked?: boolean;
-  }
+  },
 ) {
-  // The original octave-planned bass mechanism runs only on the dropdown
-  // "descendingBass" path. On the AI path, bass motion is handled by the
-  // weighted scoreStyle/scoreBassMotion logic instead (see chordScoring).
-  const useLegacyDescendingBass =
-    context.style === "descendingBass" && !context.preferences;
-
   const candidates = getChordCandidatesForDegree(chords, degree);
-  const bassFilteredCandidates =
-    useLegacyDescendingBass && context.previousBassMidi !== undefined
-      ? candidates.filter((candidate) =>
-          getPlannedBassMidi(candidate, context.previousBassMidi) <
-          (context.previousBassMidi as number)
-        )
-      : candidates;
-  const availableCandidates =
-    bassFilteredCandidates.length > 0 ? bassFilteredCandidates : candidates;
 
   return (
-    availableCandidates
-      .map((candidate) => {
-        const scoredChord = scoreChord(candidate, context);
-
-        if (!useLegacyDescendingBass || context.previousBassMidi === undefined) {
-          return scoredChord;
-        }
-
-        const bassMidi = getPlannedBassMidi(candidate, context.previousBassMidi);
-        const bassDrop = context.previousBassMidi - bassMidi;
-
-        return {
-          ...scoredChord,
-          bassMidi,
-          score:
-            scoredChord.score -
-            bassDrop * NARROW_DESCENDING_BASS_WEIGHT +
-            (bassDrop <= 2 ? 6 : bassDrop <= 5 ? 3 : 0),
-          reasons: [
-            ...scoredChord.reasons,
-            bassDrop <= 5
-              ? "Keeps the descending bass line narrow"
-              : "Keeps the bass descending, but with a wider drop",
-          ],
-        };
-      })
-      .sort((a, b) => b.score - a.score)[0] ??
-    scoreChord(chords[0], context)
+    candidates
+      .map((candidate) => scoreChord(candidate, context))
+      .sort((a, b) => b.score - a.score)[0] ?? scoreChord(chords[0], context)
   );
 }
 
@@ -189,9 +129,8 @@ function scoreChordPath(
   getRenderedPitchFn: (note: PlacedNote) => string,
   style: StyleOption,
   preferences?: GenerationPreferences,
-  revision?: RevisionContext
+  revision?: RevisionContext,
 ) {
-  const useLegacyDescendingBass = style === "descendingBass" && !preferences;
   const revisionFlags = revision
     ? {
         preserveOverallProgression: revision.preserveOverallProgression,
@@ -204,7 +143,6 @@ function scoreChordPath(
   let cadenceScore = 0;
   let openingScore = 0;
   let previousChord: ChordCandidate | undefined;
-  let previousBassMidi: number | undefined;
 
   path.forEach((degree, measureIndex) => {
     const measureNotes = measures[measureIndex] ?? [];
@@ -216,21 +154,16 @@ function scoreChordPath(
       measureCount: measures.length,
       getRenderedPitchFn,
       previousChord,
-      previousBassMidi,
       preferences,
       revision: revisionFlags,
       revisionTarget: revision?.targets[measureIndex],
       revisionLocked:
         revision?.preserveChordPositions.includes(measureIndex + 1) ?? false,
     });
-    const bassMidi = useLegacyDescendingBass
-      ? scoredChord.bassMidi ?? getPlannedBassMidi(scoredChord.chord)
-      : undefined;
 
     scoredChords.push(scoredChord);
     candidateScore += scoredChord.score;
     previousChord = scoredChord.chord;
-    previousBassMidi = bassMidi;
   });
 
   for (let i = 0; i < path.length - 1; i++) {
@@ -251,9 +184,7 @@ function scoreChordPath(
   // cadenceStrength scales the strength of the resolution bonus and the
   // weak-ending penalties. Centered so 0 halves it and 1 boosts it by 1.5x.
   // Dropdown path (no preferences) leaves the original scores untouched.
-  const cadenceMultiplier = preferences
-    ? 0.5 + preferences.cadenceStrength
-    : 1;
+  const cadenceMultiplier = preferences ? 0.5 + preferences.cadenceStrength : 1;
 
   return {
     path,
@@ -272,12 +203,12 @@ export function chooseProgression(
   getRenderedPitchFn: (note: PlacedNote) => string,
   style: StyleOption,
   preferences?: GenerationPreferences,
-  revision?: RevisionContext
+  revision?: RevisionContext,
 ) {
   const chords = buildKeyChords(key);
   const startDegrees = key.mode === "major" ? [1, 6, 4] : [1, 6, 3];
   const paths = startDegrees.flatMap((degree) =>
-    buildChordPaths(key.mode, [degree], 4)
+    buildChordPaths(key.mode, [degree], 4),
   );
 
   const rankedPaths = paths
@@ -290,8 +221,8 @@ export function chooseProgression(
         getRenderedPitchFn,
         style,
         preferences,
-        revision
-      )
+        revision,
+      ),
     )
     .sort((a, b) => b.score - a.score);
 

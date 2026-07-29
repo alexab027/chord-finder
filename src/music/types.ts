@@ -22,7 +22,7 @@ export type PlacedChord = {
 
 export type KeyMode = "major" | "minor";
 export type GenerationMode = "automatic" | KeyMode;
-export type StyleOption = "simple" | "jazzy" | "bluesy" | "descendingBass";
+export type StyleOption = "simple" | "jazzy";
 
 export type KeyContext = {
   signature: string;

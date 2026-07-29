@@ -71,7 +71,7 @@ Rules:
 - Return ONLY a JSON object. No prose, no markdown.
 - "intent" must be exactly one of: "generate_new", "revise_existing", "clarify", "answer_question".
 - "confidence" must be a number between 0 and 1.
-- "primaryStyle" must be exactly one of: "simple", "jazzy", "bluesy", "descendingBass". Use no other value.
+- "primaryStyle" must be exactly one of: "simple", "jazzy". Use no other value.
 - Do not generate a progression. Do not invent chord names for generation or revision; for answer_question, you may repeat absolute chord symbols supplied in currentProgression.
 - Explicit generation verbs strongly imply "generate_new": "make", "generate", "create", "give me", "start over", "new progression", "make me a progression", "make a new progression", and "generate a progression" are "generate_new" unless the user clearly asks to change the existing progression.
 - Use "generate_new" when the user asks for a new progression, a different style, to start over, or asks broadly for "make me" / "give me" harmony.
@@ -91,7 +91,6 @@ Rules:
 - Do not return a revision action unless it is supported by the exact chord edits schema below.
 - Map simple / pop / clean / basic language toward "simple".
 - Map jazz / lush / sophisticated / colorful language toward "jazzy".
-- Map blues / gritty / dominant-seventh language toward "bluesy".
 - For explicit "descending bass", "descending bass line", or "descending bassline" requests, set "descendingBassWeight" to 1.0.
 - Increase "descendingBassWeight" for falling, walking-down, or descending bass requests.
 - Lower "dissonanceTolerance" for safe, smooth, or consonant requests.
@@ -155,7 +154,9 @@ function clampDelta(value: unknown): number | undefined {
   return Math.min(1, Math.max(-1, value));
 }
 
-export function sanitizeCurrentProgression(value: unknown): CurrentProgressionItem[] {
+export function sanitizeCurrentProgression(
+  value: unknown,
+): CurrentProgressionItem[] {
   if (!Array.isArray(value)) return [];
   return value.slice(0, MAX_PROGRESSION_MEASURES).flatMap((raw) => {
     const item = (raw ?? {}) as Record<string, unknown>;
@@ -355,7 +356,6 @@ function extractExplicitCopyActions(prompt: string): ChordEditAction[] {
   return actions;
 }
 
-
 function extractValidatedReplaceActions(prompt: string): ChordEditAction[] {
   const actions: ChordEditAction[] = [];
   const pattern = new RegExp(
@@ -402,7 +402,10 @@ function validateExplicitReplacementSyntax(prompt: string): string | null {
 }
 
 function normalizeChordName(chordName: string) {
-  return chordName.trim().replace(/[.,!?;:]+$/, "").toLowerCase();
+  return chordName
+    .trim()
+    .replace(/[.,!?;:]+$/, "")
+    .toLowerCase();
 }
 
 function mergeLiteralReplaceActions(

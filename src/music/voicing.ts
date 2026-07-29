@@ -9,7 +9,6 @@ import type {
   PlacedChord,
   PlacedNote,
   ScoredChord,
-  StyleOption,
 } from "./types";
 
 export type VoicingLimits = {
@@ -56,7 +55,7 @@ function getNearestPitchAtLeast(referencePitchNumber: number, pc: number) {
 function buildAscendingVoicing(
   pcs: number[],
   bassPitchNumber: number,
-  minAdjacentGap: number
+  minAdjacentGap: number,
 ) {
   return pcs.reduce<number[]>((pitchNumbers, pc, index) => {
     if (index === 0) return [bassPitchNumber];
@@ -74,13 +73,13 @@ function getPitchClasses(pitchNumbers: number[]) {
 
 export function isVoicingPlayable(
   pitchNumbers: number[],
-  limits: VoicingLimits = DEFAULT_ONE_HAND_VOICING_LIMITS
+  limits: VoicingLimits = DEFAULT_ONE_HAND_VOICING_LIMITS,
 ) {
   if (pitchNumbers.length === 0) return false;
 
   const sorted = [...pitchNumbers].sort((a, b) => a - b);
   const hasVoiceCrossing = pitchNumbers.some(
-    (pitchNumber, index) => pitchNumber !== sorted[index]
+    (pitchNumber, index) => pitchNumber !== sorted[index],
   );
   if (hasVoiceCrossing) return false;
 
@@ -88,7 +87,7 @@ export function isVoicingPlayable(
     pitchNumbers.some(
       (pitchNumber) =>
         pitchNumber < limits.minPitchNumber ||
-        pitchNumber > limits.maxPitchNumber
+        pitchNumber > limits.maxPitchNumber,
     )
   ) {
     return false;
@@ -129,7 +128,7 @@ function scoreVoicing(
   pitchNumbers: number[],
   previousPitchNumbers: number[] | undefined,
   lowestMelodyPitchNumber: number | undefined,
-  voiceLeadingPriority: number
+  voiceLeadingPriority: number,
 ) {
   let score = 0;
   const totalSpan = pitchNumbers[pitchNumbers.length - 1] - pitchNumbers[0];
@@ -137,7 +136,10 @@ function scoreVoicing(
   score -= Math.max(0, totalSpan - PREFERRED_TOTAL_SPAN) * 0.8;
 
   for (let index = 2; index < pitchNumbers.length; index++) {
-    score -= Math.max(0, pitchNumbers[index] - pitchNumbers[index - 1] - PREFERRED_UPPER_GAP);
+    score -= Math.max(
+      0,
+      pitchNumbers[index] - pitchNumbers[index - 1] - PREFERRED_UPPER_GAP,
+    );
   }
 
   if (lowestMelodyPitchNumber !== undefined) {
@@ -152,20 +154,24 @@ function scoreVoicing(
   if (previousPitchNumbers) {
     const previousPcs = new Set(getPitchClasses(previousPitchNumbers));
     const commonToneCount = getPitchClasses(pitchNumbers).filter((pc) =>
-      previousPcs.has(pc)
+      previousPcs.has(pc),
     ).length;
     const bassMotion = Math.abs(pitchNumbers[0] - previousPitchNumbers[0]);
-    const sharedLength = Math.min(pitchNumbers.length, previousPitchNumbers.length);
+    const sharedLength = Math.min(
+      pitchNumbers.length,
+      previousPitchNumbers.length,
+    );
     const totalMovement = pitchNumbers
       .slice(0, sharedLength)
       .reduce(
         (total, pitchNumber, index) =>
           total + Math.abs(pitchNumber - previousPitchNumbers[index]),
-        0
+        0,
       );
 
     score += commonToneCount * 2 * voiceLeadingPriority;
-    score -= Math.max(0, bassMotion - PREFERRED_BASS_MOTION) * voiceLeadingPriority;
+    score -=
+      Math.max(0, bassMotion - PREFERRED_BASS_MOTION) * voiceLeadingPriority;
     score -= totalMovement * 0.12 * voiceLeadingPriority;
   }
 
@@ -191,7 +197,7 @@ function getCompleteToneInversions(pcs: number[], noteNames: string[]) {
       .filter((tone) => tone !== bassTone)
       .sort(
         (left, right) =>
-          mod12(left.pc - bassTone.pc) - mod12(right.pc - bassTone.pc)
+          mod12(left.pc - bassTone.pc) - mod12(right.pc - bassTone.pc),
       ),
   ]);
 }
@@ -199,8 +205,8 @@ function getCompleteToneInversions(pcs: number[], noteNames: string[]) {
 function buildCandidateVoicings(
   toneOrders: VoicingTone[][],
   previousBassPitchNumber: number | undefined,
-  style: StyleOption,
-  limits: VoicingLimits
+  descendingBassWeight: number,
+  limits: VoicingLimits,
 ) {
   return toneOrders.flatMap((tones) => {
     const candidateBassPitchNumbers: number[] = [];
@@ -216,42 +222,47 @@ function buildCandidateVoicings(
     }
 
     const basses =
-      style === "descendingBass" && previousBassPitchNumber !== undefined
+      descendingBassWeight > 0 && previousBassPitchNumber !== undefined
         ? candidateBassPitchNumbers.filter(
-            (pitchNumber) => pitchNumber < previousBassPitchNumber
+            (pitchNumber) => pitchNumber < previousBassPitchNumber,
           )
         : candidateBassPitchNumbers;
     const effectiveBasses =
       basses.length > 0 ? basses : candidateBassPitchNumbers;
 
     return effectiveBasses.flatMap((bassPitchNumber) =>
-      CANDIDATE_ADJACENT_VOICE_GAPS.map((gap): CandidateVoicing => ({
-        pitchNumbers: buildAscendingVoicing(
-          tones.map((tone) => tone.pc),
-          bassPitchNumber,
-          gap
-        ),
-        noteNames: tones.map((tone) => tone.noteName),
-      }))
+      CANDIDATE_ADJACENT_VOICE_GAPS.map(
+        (gap): CandidateVoicing => ({
+          pitchNumbers: buildAscendingVoicing(
+            tones.map((tone) => tone.pc),
+            bassPitchNumber,
+            gap,
+          ),
+          noteNames: tones.map((tone) => tone.noteName),
+        }),
+      ),
     );
   });
 }
 
 function buildFallbackVoicing(
   toneOrders: VoicingTone[][],
-  limits: VoicingLimits
+  limits: VoicingLimits,
 ): CandidateVoicing {
   for (const tones of toneOrders) {
     const pcs = tones.map((tone) => tone.pc);
     for (
-      let bassPitchNumber = getNearestPitchAtLeast(limits.minPitchNumber, pcs[0]);
+      let bassPitchNumber = getNearestPitchAtLeast(
+        limits.minPitchNumber,
+        pcs[0],
+      );
       bassPitchNumber <= limits.maxPitchNumber;
       bassPitchNumber += 12
     ) {
       const pitchNumbers = buildAscendingVoicing(
         pcs,
         bassPitchNumber,
-        MIN_ADJACENT_VOICE_GAP
+        MIN_ADJACENT_VOICE_GAP,
       );
       if (isVoicingPlayable(pitchNumbers, limits)) {
         return {
@@ -263,9 +274,9 @@ function buildFallbackVoicing(
   }
 
   throw new Error(
-    `Unable to construct a playable fallback voicing for pitch classes [${toneOrders[0].map((tone) => tone.pc).join(
-      ", "
-    )}] within the configured limits.`
+    `Unable to construct a playable fallback voicing for pitch classes [${toneOrders[0]
+      .map((tone) => tone.pc)
+      .join(", ")}] within the configured limits.`,
   );
 }
 
@@ -276,11 +287,11 @@ export function choosePlayableVoicing(
     lowestMelodyPitchNumber?: number;
     previousPitchNumbers?: number[];
     previousBassPitchNumber?: number;
-    style?: StyleOption;
+    descendingBassWeight?: number;
     voiceLeadingPriority?: number;
     playabilityRequired?: boolean;
     limits?: VoicingLimits;
-  } = {}
+  } = {},
 ) {
   const playabilityRequired = options.playabilityRequired ?? true;
   const limits =
@@ -288,14 +299,14 @@ export function choosePlayableVoicing(
     (playabilityRequired
       ? DEFAULT_ONE_HAND_VOICING_LIMITS
       : RELAXED_VOICING_LIMITS);
-  const style = options.style ?? "simple";
+  const descendingBassWeight = options.descendingBassWeight ?? 0;
   const voiceLeadingPriority = options.voiceLeadingPriority ?? 0.75;
   const toneOrders = getCompleteToneInversions(pcs, noteNames);
   const candidates = buildCandidateVoicings(
     toneOrders,
     options.previousBassPitchNumber,
-    style,
-    limits
+    descendingBassWeight,
+    limits,
   ).filter(({ pitchNumbers }) => isVoicingPlayable(pitchNumbers, limits));
 
   const chosen =
@@ -306,14 +317,14 @@ export function choosePlayableVoicing(
           candidate.pitchNumbers,
           options.previousPitchNumbers,
           options.lowestMelodyPitchNumber,
-          voiceLeadingPriority
+          voiceLeadingPriority,
         ),
       }))
       .sort((a, b) => b.score - a.score)[0] ??
     buildFallbackVoicing(toneOrders, limits);
 
   return chosen.pitchNumbers.map((pitchNumber, index) =>
-    midiToSpelledPitch(pitchNumber, chosen.noteNames[index])
+    midiToSpelledPitch(pitchNumber, chosen.noteNames[index]),
   );
 }
 
@@ -330,36 +341,33 @@ export function voiceProgression(
   progression: ScoredChord[],
   measures: PlacedNote[][],
   getRenderedPitchFn: (note: PlacedNote) => string,
-  style: StyleOption,
-  preferences?: GenerationPreferences
+  preferences?: GenerationPreferences,
 ): PlacedChord[][] {
   let previousBassMidi: number | undefined;
   let previousPitchNumbers: number[] | undefined;
-
+  const descendingBassWeight = preferences?.descendingBassWeight ?? 0;
   return progression.map((scoredChord, measureIndex) => {
     const chord = scoredChord.chord;
     const lowestMelodyMidi = getMeasureLowestMelodyMidi(
       measures[measureIndex],
-      getRenderedPitchFn
+      getRenderedPitchFn,
     );
-    const pitches = choosePlayableVoicing(
-      chord.pcs,
-      chord.noteNames,
-      {
-        lowestMelodyPitchNumber: lowestMelodyMidi,
-        previousPitchNumbers,
-        previousBassPitchNumber:
-          style === "descendingBass" ? previousBassMidi : undefined,
-        style,
-        voiceLeadingPriority: preferences?.voiceLeadingPriority,
-        playabilityRequired: preferences?.playabilityRequired,
-      }
-    );
+    const pitches = choosePlayableVoicing(chord.pcs, chord.noteNames, {
+      lowestMelodyPitchNumber: lowestMelodyMidi,
+      previousPitchNumbers,
+      previousBassPitchNumber:
+        descendingBassWeight > 0 ? previousBassMidi : undefined,
+      descendingBassWeight,
+      voiceLeadingPriority: preferences?.voiceLeadingPriority,
+      playabilityRequired: preferences?.playabilityRequired,
+    });
 
     previousBassMidi = parsePitchToMidi(pitches[0]) ?? previousBassMidi;
     previousPitchNumbers = pitches
       .map((pitch) => parsePitchToMidi(pitch))
-      .filter((pitchNumber): pitchNumber is number => pitchNumber !== undefined);
+      .filter(
+        (pitchNumber): pitchNumber is number => pitchNumber !== undefined,
+      );
 
     return [
       {

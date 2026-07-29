@@ -77,15 +77,6 @@ function asksForExplicitDescendingBass(prompt: string) {
   return /\bdescending\s+bass(?:\s*line|line)?\b/i.test(prompt);
 }
 
-function getEffectiveStyle(
-  prompt: string,
-  fallbackStyle: StyleOption,
-): StyleOption {
-  return asksForExplicitDescendingBass(prompt)
-    ? "descendingBass"
-    : fallbackStyle;
-}
-
 export default function Staff() {
   const staffWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -273,7 +264,6 @@ export default function Staff() {
   function renderProgression(
     finalProgression: ScoredChord[],
     keyLabel: string,
-    effectiveStyle: StyleOption,
     label: "Generated" | "Updated",
     preferences?: GenerationPreferences,
   ) {
@@ -281,7 +271,6 @@ export default function Staff() {
       finalProgression,
       measures,
       getRenderedPitch,
-      effectiveStyle,
       preferences,
     );
     lastProgressionRef.current = finalProgression;
@@ -315,10 +304,7 @@ export default function Staff() {
     normalizedPrompt: string,
     data?: HarmonyRouterResponse,
   ): void {
-    const effectiveStyle = getEffectiveStyle(
-      normalizedPrompt,
-      data?.primaryStyle ?? BLANK_PROMPT_STYLE,
-    );
+    const effectiveStyle = data?.primaryStyle ?? BLANK_PROMPT_STYLE;
     const preferences = toGenerationPreferences(
       data ?? DEFAULT_INTERPRETED_STYLE,
     );
@@ -353,7 +339,6 @@ export default function Staff() {
     renderProgression(
       finalProgression,
       generatedKey.label,
-      effectiveStyle,
       "Generated",
       preferences,
     );
@@ -381,10 +366,8 @@ export default function Staff() {
     const requestedActions = data.actions ?? [];
 
     if (requestedActions.length > 0) {
-      const effectiveStyle = getEffectiveStyle(
-        normalizedPrompt,
-        aiInterpretation?.primaryStyle ?? BLANK_PROMPT_STYLE,
-      );
+      const effectiveStyle =
+        aiInterpretation?.primaryStyle ?? BLANK_PROMPT_STYLE;
       // Apply only the returned preference patch to the current active
       // preferences so a combined request (deterministic chord actions plus an
       // explicit style/preference change like "make it jazzier") applies both.
@@ -426,7 +409,6 @@ export default function Staff() {
       renderProgression(
         finalProgression,
         generatedKey.label,
-        effectiveStyle,
         "Updated",
         effectivePreferences,
       );
@@ -445,10 +427,7 @@ export default function Staff() {
       toGenerationPreferences(baseInterpretation),
       revisionIntent.requestedChanges,
     );
-    const effectiveStyle = getEffectiveStyle(
-      normalizedPrompt,
-      baseInterpretation.primaryStyle,
-    );
+    const effectiveStyle = baseInterpretation.primaryStyle;
     const effectivePreferences: GenerationPreferences = {
       ...applied,
       style: effectiveStyle,
@@ -502,7 +481,6 @@ export default function Staff() {
     renderProgression(
       finalProgression,
       generatedKey.label,
-      effectiveStyle,
       "Updated",
       effectivePreferences,
     );
@@ -548,7 +526,6 @@ export default function Staff() {
     renderProgression(
       finalProgression,
       generatedKey.label,
-      effectiveStyle,
       "Updated",
       effectivePreferences,
     );
@@ -743,14 +720,12 @@ export default function Staff() {
     // Source of truth for any further revisions/edits.
     lastProgressionRef.current = next;
 
-    // Re-voice the COMPLETE progression. Style mirrors what generation used:
-    // the interpreted primaryStyle, or the blank-prompt default.
-    const style = aiInterpretation?.primaryStyle ?? BLANK_PROMPT_STYLE;
+    // Re-voice the COMPLETE progression using the generation preferences.
     const preferences = aiInterpretation
       ? toGenerationPreferences(aiInterpretation)
       : toGenerationPreferences(DEFAULT_INTERPRETED_STYLE);
     setChordMeasures(
-      voiceProgression(next, measures, getRenderedPitch, style, preferences),
+      voiceProgression(next, measures, getRenderedPitch, preferences),
     );
     pushProgressionCard("Updated", editedKey.label, next);
     // We do NOT auto-request an explanation here: copied chords carry stale

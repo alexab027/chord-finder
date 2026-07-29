@@ -9,6 +9,7 @@ import {
   type VoicingLimits,
 } from "./voicing";
 import { parsePitchToMidi } from "./noteUtils";
+import { DEFAULT_HARMONY_PROFILE } from "../harmony/preferences";
 
 describe("voicing validity", () => {
   it("rejects a chord spanning too many semitones", () => {
@@ -31,14 +32,11 @@ describe("voicing validity", () => {
     const wideSuspendedShape = [40, 47, 57];
 
     expect(
-      isVoicingPlayable(
-        wideSuspendedShape,
-        DEFAULT_ONE_HAND_VOICING_LIMITS,
-      ),
+      isVoicingPlayable(wideSuspendedShape, DEFAULT_ONE_HAND_VOICING_LIMITS),
     ).toBe(false);
-    expect(
-      isVoicingPlayable(wideSuspendedShape, RELAXED_VOICING_LIMITS),
-    ).toBe(true);
+    expect(isVoicingPlayable(wideSuspendedShape, RELAXED_VOICING_LIMITS)).toBe(
+      true,
+    );
   });
 
   it("rejects an excessive bass-to-upper-voice gap", () => {
@@ -87,7 +85,7 @@ describe("voicing validity", () => {
       },
     ];
 
-    const voiced = voiceProgression(progression, [[]], () => "c/5", "simple");
+    const voiced = voiceProgression(progression, [[]], () => "c/5");
     const pitchNumbers = voiced[0][0].pitches.map((pitch) =>
       parsePitchToMidi(pitch),
     );
@@ -99,11 +97,9 @@ describe("voicing validity", () => {
     "preserves every pitch class once, ascending order, and range when playabilityRequired=%s",
     (playabilityRequired) => {
       const inputPcs = [0, 4, 7, 2];
-      const pitches = choosePlayableVoicing(
-        inputPcs,
-        ["c", "e", "g", "d"],
-        { playabilityRequired },
-      );
+      const pitches = choosePlayableVoicing(inputPcs, ["c", "e", "g", "d"], {
+        playabilityRequired,
+      });
       const pitchNumbers = pitches.map(
         (pitch) => parsePitchToMidi(pitch) as number,
       );
@@ -137,9 +133,9 @@ describe("voicing validity", () => {
     expect(pitchNumbers).toHaveLength(inputPcs.length);
     expect(pitchNumbers.at(-1)! - pitchNumbers[0]).toBeLessThanOrEqual(12);
     expect(pitchNumbers).toEqual([...pitchNumbers].sort((a, b) => a - b));
-    expect(pitchNumbers.map((pitch) => ((pitch % 12) + 12) % 12).sort()).toEqual(
-      [...inputPcs].sort(),
-    );
+    expect(
+      pitchNumbers.map((pitch) => ((pitch % 12) + 12) % 12).sort(),
+    ).toEqual([...inputPcs].sort());
   });
 
   it("permits a wider complete voicing when playability is not required", () => {
@@ -209,12 +205,10 @@ describe("voicing validity", () => {
       },
     ];
 
-    const voiced = voiceProgression(
-      progression,
-      [[], []],
-      () => "c/5",
-      "descendingBass",
-    );
+    const voiced = voiceProgression(progression, [[], []], () => "c/5", {
+      ...DEFAULT_HARMONY_PROFILE,
+      descendingBassWeight: 1,
+    });
     const basses = voiced.map((measure) =>
       parsePitchToMidi(measure[0].pitches[0]),
     );
@@ -257,18 +251,15 @@ describe("voicing validity", () => {
     };
 
     expect(() =>
-      voiceProgression(progression, [[]], () => "c/5", "simple", {
+      voiceProgression(progression, [[]], () => "c/5", {
         ...basePreferences,
         playabilityRequired: true,
       }),
     ).toThrow(/playable fallback voicing/i);
-    const relaxed = voiceProgression(
-      progression,
-      [[]],
-      () => "c/5",
-      "simple",
-      { ...basePreferences, playabilityRequired: false },
-    )[0][0].pitches.map((pitch) => parsePitchToMidi(pitch) as number);
+    const relaxed = voiceProgression(progression, [[]], () => "c/5", {
+      ...basePreferences,
+      playabilityRequired: false,
+    })[0][0].pitches.map((pitch) => parsePitchToMidi(pitch) as number);
 
     expect(isVoicingPlayable(relaxed, RELAXED_VOICING_LIMITS)).toBe(true);
     expect(relaxed.at(-1)! - relaxed[0]).toBeGreaterThan(12);

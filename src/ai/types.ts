@@ -51,12 +51,7 @@ export const DEFAULT_INTERPRETED_STYLE: InterpretedStyle = {
 
 // Mirrors the StyleOption union so the server route can validate the model's
 // chosen style without weakening primaryStyle to a broad string.
-export const ALLOWED_STYLES: StyleOption[] = [
-  "simple",
-  "jazzy",
-  "bluesy",
-  "descendingBass",
-];
+export const ALLOWED_STYLES: StyleOption[] = ["simple", "jazzy"];
 
 // Returned by the interpretation route only when the request says a progression
 // already exists. It tells the deterministic engine HOW MUCH to keep, never

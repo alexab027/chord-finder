@@ -7,7 +7,7 @@ Chord Finder is an interactive harmony tool for turning a short melody into a pl
 - Compose a four-measure melody in 4/4 using whole, half, quarter, and eighth notes or rests.
 - Add sharps, flats, and naturals, then choose a key signature and automatic, major, or minor mode.
 - Generate a best-fit progression with a deterministic music-theory engine.
-- Describe a style or mood in plain language, including jazz, blues, complexity, cadence, and bass-motion preferences.
+- Describe a style or mood in plain language, including jazz, complexity, cadence, and bass-motion preferences.
 - Revise an existing progression conversationally or make exact edits such as replacing or copying a chord.
 - Ask for a plain-English explanation of the current progression.
 - View chord symbols and Roman numerals alongside standard notation.

@@ -17,10 +17,7 @@ import {
 } from "./noteUtils";
 import { CHORD_QUALITIES } from "../harmony/chordSymbol";
 
-export const TRIAD_QUALITIES: Record<
-  KeyMode,
-  ("major" | "minor" | "dim")[]
-> = {
+export const TRIAD_QUALITIES: Record<KeyMode, ("major" | "minor" | "dim")[]> = {
   major: ["major", "minor", "minor", "major", "major", "minor", "dim"],
   minor: ["minor", "dim", "major", "minor", "major", "major", "major"],
 };
@@ -36,7 +33,7 @@ const SUSPENDED_CHORD_QUALITIES: SuspendedChordQuality[] = [
   "sus4",
 ];
 
-const BLUES_DOMINANT_DEGREES = [1, 4, 5];
+const BORROWED_DOMINANT_DEGREES = [1, 4, 5];
 
 function formatBassName(noteName: string) {
   return NOTE_LABELS[noteName.toLowerCase()] ?? noteName.toUpperCase();
@@ -56,7 +53,7 @@ function getAbsoluteSeventhSuffix(quality: "maj7" | "min7" | "dom7") {
 
 function buildInversionCandidates(
   candidate: ChordCandidate,
-  maxBassIndex = candidate.pcs.length - 1
+  maxBassIndex = candidate.pcs.length - 1,
 ) {
   const candidates = [
     {
@@ -99,7 +96,7 @@ function buildInversionCandidates(
 function buildScaleSpellings(key: KeyContext) {
   const tonicLetterIndex = NOTE_LETTERS.indexOf(key.tonicName[0].toLowerCase());
   const scalePcs = SCALE_OFFSETS[key.mode].map((offset) =>
-    mod12(key.tonicPc + offset)
+    mod12(key.tonicPc + offset),
   );
 
   return scalePcs.map((pc, degreeIndex) => {
@@ -149,7 +146,7 @@ function buildMajorKeyChords(key: KeyContext): ChordCandidate[] {
         romanNumerals[degreeIndex],
         pcs,
         degree.name,
-        TRIAD_QUALITIES[key.mode][degreeIndex]
+        TRIAD_QUALITIES[key.mode][degreeIndex],
       ),
       ...buildSeventhChordCandidates(
         degreeIndex + 1,
@@ -158,7 +155,7 @@ function buildMajorKeyChords(key: KeyContext): ChordCandidate[] {
         degree.name,
         pcs,
         TRIAD_QUALITIES[key.mode][degreeIndex],
-        key.mode
+        key.mode,
       ),
       ...SUSPENDED_CHORD_QUALITIES.map((quality) =>
         buildSuspendedChordCandidate(
@@ -167,14 +164,14 @@ function buildMajorKeyChords(key: KeyContext): ChordCandidate[] {
           degree.pc,
           degree.name,
           fifth.name,
-          quality
-        )
+          quality,
+        ),
       ),
     ].flatMap((candidate) =>
       buildInversionCandidates(
         candidate,
-        candidate.quality === "add9" ? 2 : candidate.pcs.length - 1
-      )
+        candidate.quality === "add9" ? 2 : candidate.pcs.length - 1,
+      ),
     );
   });
 }
@@ -205,13 +202,15 @@ function buildSuspendedChordCandidate(
   rootPc: number,
   rootName: string,
   fifthName: string,
-  quality: SuspendedChordQuality
+  quality: SuspendedChordQuality,
 ): ChordCandidate {
   const pcs = getSuspendedChordPcs(rootPc, quality);
   const suspendedLetterOffset = quality === "sus2" ? 1 : 3;
   const rootLetterIndex = NOTE_LETTERS.indexOf(rootName[0].toLowerCase());
   const suspendedLetter =
-    NOTE_LETTERS[(rootLetterIndex + suspendedLetterOffset) % NOTE_LETTERS.length];
+    NOTE_LETTERS[
+      (rootLetterIndex + suspendedLetterOffset) % NOTE_LETTERS.length
+    ];
   const noteNames = [
     spellPitchClassForLetter(pcs[0], rootName[0]),
     spellPitchClassForLetter(pcs[1], fifthName[0]),
@@ -244,7 +243,7 @@ function buildAdd9ChordCandidate(
   romanNumeral: string,
   triadPcs: number[],
   rootName: string,
-  triadQuality: "major" | "minor" | "dim"
+  triadQuality: "major" | "minor" | "dim",
 ): ChordCandidate {
   const ninthPc = mod12(triadPcs[0] + 14);
   const ninthLetter = getScaleLetter(rootName, 1);
@@ -275,7 +274,7 @@ function buildAdd9ChordCandidate(
 function getDiatonicSeventhQuality(
   triadQuality: "major" | "minor" | "dim",
   degree: number,
-  mode: KeyMode
+  mode: KeyMode,
 ) {
   if (mode === "major" && degree === 5) return "dom7";
   if (mode === "minor" && (degree === 5 || degree === 7)) return "dom7";
@@ -291,7 +290,7 @@ function buildSeventhChordCandidate(
   rootName: string,
   triadPcs: number[],
   quality: "maj7" | "min7" | "dom7",
-  keyFit: "diatonic" | "borrowed"
+  keyFit: "diatonic" | "borrowed",
 ): ChordCandidate {
   const seventhPc = mod12(rootPc + (quality === "maj7" ? 11 : 10));
   const seventhLetter = getScaleLetter(rootName, 6);
@@ -326,7 +325,7 @@ function buildSeventhChordCandidates(
   rootName: string,
   triadPcs: number[],
   triadQuality: "major" | "minor" | "dim",
-  mode: KeyMode
+  mode: KeyMode,
 ) {
   const diatonicQuality = getDiatonicSeventhQuality(triadQuality, degree, mode);
   const candidates: ChordCandidate[] = [];
@@ -340,14 +339,14 @@ function buildSeventhChordCandidates(
         rootName,
         triadPcs,
         diatonicQuality,
-        "diatonic"
-      )
+        "diatonic",
+      ),
     );
   }
 
   if (
     triadQuality !== "dim" &&
-    BLUES_DOMINANT_DEGREES.includes(degree) &&
+    BORROWED_DOMINANT_DEGREES.includes(degree) &&
     diatonicQuality !== "dom7"
   ) {
     candidates.push(
@@ -358,8 +357,8 @@ function buildSeventhChordCandidates(
         rootName,
         triadPcs,
         "dom7",
-        "borrowed"
-      )
+        "borrowed",
+      ),
     );
   }
 
@@ -382,29 +381,25 @@ export function buildRequestedChord(
   key: KeyContext,
   degree: number,
   quality: RequestedChordQuality,
-  extension?: 7
+  extension?: 7,
 ): ChordCandidate {
-  const degreeIndex = ((degree - 1) % 7 + 7) % 7;
+  const degreeIndex = (((degree - 1) % 7) + 7) % 7;
   const scaleSpellings = buildScaleSpellings(key);
   const root = scaleSpellings[degreeIndex];
   const romanBase = ROMAN_NUMERALS[key.mode][degreeIndex];
 
   const triadQuality: "major" | "minor" | "dim" =
-    quality === "minor"
-      ? "minor"
-      : quality === "diminished"
-        ? "dim"
-        : "major"; // major + dominant both use a major triad
+    quality === "minor" ? "minor" : quality === "diminished" ? "dim" : "major"; // major + dominant both use a major triad
   const triadPcs = getTriadPcs(root.pc, triadQuality);
 
   const rootName = spellPitchClassForLetter(triadPcs[0], root.name[0]);
   const thirdName = spellPitchClassForLetter(
     triadPcs[1],
-    getScaleLetter(root.name, 2)
+    getScaleLetter(root.name, 2),
   );
   const fifthName = spellPitchClassForLetter(
     triadPcs[2],
-    getScaleLetter(root.name, 4)
+    getScaleLetter(root.name, 4),
   );
 
   if (extension !== 7) {
@@ -423,7 +418,7 @@ export function buildRequestedChord(
         triadPcs[0],
         triadPcs[1],
         triadPcs[2],
-        noteNames
+        noteNames,
       ),
       quality: "triad",
       keyFit: "diatonic",
@@ -439,7 +434,7 @@ export function buildRequestedChord(
   const seventhPc = mod12(triadPcs[0] + seventhInterval);
   const seventhName = spellPitchClassForLetter(
     seventhPc,
-    getScaleLetter(root.name, 6)
+    getScaleLetter(root.name, 6),
   );
   const pcs = [...triadPcs, seventhPc];
   const noteNames = [rootName, thirdName, fifthName, seventhName];
@@ -464,7 +459,7 @@ function getRomanForAbsoluteChord(
   key: KeyContext,
   degreeIndex: number,
   rootPc: number,
-  quality: RequestedChordQuality
+  quality: RequestedChordQuality,
 ) {
   if (degreeIndex === -1) return NOTE_LABELS[PC_TO_NOTE_SHARP[rootPc]];
 
@@ -498,18 +493,16 @@ function getRomanForAbsoluteChord(
   */
 }
 
-function parseNamedChord(chordName: string):
-  | {
-      rootName: string;
-      rootPc: number;
-      quality: RequestedChordQuality | SuspendedChordQuality;
-      extension?: 7;
-    }
-  | null {
+function parseNamedChord(chordName: string): {
+  rootName: string;
+  rootPc: number;
+  quality: RequestedChordQuality | SuspendedChordQuality;
+  extension?: 7;
+} | null {
   const normalized = chordName.trim().replace(/\s+/g, "");
-  const match = new RegExp(
-    `^([A-Ga-g])([#b]?)(${CHORD_QUALITIES})?(7)?$`
-  ).exec(normalized);
+  const match = new RegExp(`^([A-Ga-g])([#b]?)(${CHORD_QUALITIES})?(7)?$`).exec(
+    normalized,
+  );
   if (!match) return null;
 
   const rootName = `${match[1].toLowerCase()}${match[2] ?? ""}`;
@@ -550,7 +543,7 @@ function parseNamedChord(chordName: string):
 
 export function buildNamedChord(
   key: KeyContext,
-  chordName: string
+  chordName: string,
 ): ChordCandidate | null {
   const parsed = parseNamedChord(chordName);
   if (!parsed) return null;
@@ -564,7 +557,7 @@ export function buildNamedChord(
     parsed.quality === "sus4"
   ) {
     const susDegreeIndex = SCALE_OFFSETS[key.mode].findIndex(
-      (offset) => mod12(key.tonicPc + offset) === parsed.rootPc
+      (offset) => mod12(key.tonicPc + offset) === parsed.rootPc,
     );
     const romanBase =
       susDegreeIndex === -1
@@ -578,7 +571,7 @@ export function buildNamedChord(
       parsed.rootPc,
       parsed.rootName,
       getScaleLetter(parsed.rootName, 4),
-      parsed.quality
+      parsed.quality,
     );
     return {
       ...candidate,
@@ -596,22 +589,22 @@ export function buildNamedChord(
   const rootName = spellPitchClassForLetter(triadPcs[0], parsed.rootName[0]);
   const thirdName = spellPitchClassForLetter(
     triadPcs[1],
-    getScaleLetter(rootName, 2)
+    getScaleLetter(rootName, 2),
   );
   const fifthName = spellPitchClassForLetter(
     triadPcs[2],
-    getScaleLetter(rootName, 4)
+    getScaleLetter(rootName, 4),
   );
   const romanBase = getRomanForAbsoluteChord(
     key,
     SCALE_OFFSETS[key.mode].findIndex(
-      (offset) => mod12(key.tonicPc + offset) === parsed.rootPc
+      (offset) => mod12(key.tonicPc + offset) === parsed.rootPc,
     ),
     parsed.rootPc,
-    parsed.quality
+    parsed.quality,
   );
   const degreeIndex = SCALE_OFFSETS[key.mode].findIndex(
-    (offset) => mod12(key.tonicPc + offset) === parsed.rootPc
+    (offset) => mod12(key.tonicPc + offset) === parsed.rootPc,
   );
   const degree = degreeIndex === -1 ? 0 : degreeIndex + 1;
 
@@ -631,7 +624,7 @@ export function buildNamedChord(
         triadPcs[0],
         triadPcs[1],
         triadPcs[2],
-        noteNames
+        noteNames,
       ),
       quality: "triad",
       keyFit: "unrelated",
@@ -648,7 +641,7 @@ export function buildNamedChord(
   const seventhPc = mod12(triadPcs[0] + seventhInterval);
   const seventhName = spellPitchClassForLetter(
     seventhPc,
-    getScaleLetter(rootName, 6)
+    getScaleLetter(rootName, 6),
   );
   const pcs = [...triadPcs, seventhPc];
   const noteNames = [rootName, thirdName, fifthName, seventhName];
@@ -694,7 +687,7 @@ function assertCmajorNamedChordMappings() {
     const candidate = buildNamedChord(cMajor, chordName);
     if (candidate?.name !== romanNumeral) {
       throw new Error(
-        `Named chord mapping failed: ${chordName} expected ${romanNumeral}, got ${candidate?.name ?? "null"}`
+        `Named chord mapping failed: ${chordName} expected ${romanNumeral}, got ${candidate?.name ?? "null"}`,
       );
     }
   }
@@ -747,7 +740,7 @@ export function buildKeyChords(key: KeyContext): ChordCandidate[] {
         ROMAN_NUMERALS[key.mode][degreeIndex],
         pcs,
         degree.name,
-        quality
+        quality,
       ),
       ...buildSeventhChordCandidates(
         degreeIndex + 1,
@@ -756,7 +749,7 @@ export function buildKeyChords(key: KeyContext): ChordCandidate[] {
         degree.name,
         pcs,
         quality,
-        key.mode
+        key.mode,
       ),
       ...SUSPENDED_CHORD_QUALITIES.map((susQuality) =>
         buildSuspendedChordCandidate(
@@ -765,14 +758,14 @@ export function buildKeyChords(key: KeyContext): ChordCandidate[] {
           degree.pc,
           degree.name,
           fifth.name,
-          susQuality
-        )
+          susQuality,
+        ),
       ),
     ].flatMap((candidate) =>
       buildInversionCandidates(
         candidate,
-        candidate.quality === "add9" ? 2 : candidate.pcs.length - 1
-      )
+        candidate.quality === "add9" ? 2 : candidate.pcs.length - 1,
+      ),
     );
   });
 }

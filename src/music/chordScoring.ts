@@ -66,7 +66,7 @@ function getNoteNameLabel(noteName: string) {
 export function getMelodyNoteImportance(
   note: PlacedNote,
   measureNotes: PlacedNote[],
-  isFinalMeasure = false
+  isFinalMeasure = false,
 ) {
   const beatSlots = getBeatSlots(DEFAULT_TIME_SIGNATURE);
   const coveredBeatWeight = beatSlots.reduce((total, slot) => {
@@ -80,12 +80,13 @@ export function getMelodyNoteImportance(
     ...measureNotes
       .filter((measureNote) => measureNote.kind === "note")
       .map((measureNote) => measureNote.slot + measureNote.durationSlots),
-    0
+    0,
   );
   const isFinalMelodicEvent =
     isFinalMeasure && note.slot + note.durationSlots >= latestNoteEnd;
 
-  let importance = 1 + durationWeight + metricWeight * 0.45 + coveredBeatWeight * 0.25;
+  let importance =
+    1 + durationWeight + metricWeight * 0.45 + coveredBeatWeight * 0.25;
 
   if (measureEnd) importance += 0.25;
   if (isFinalMeasure) importance += 0.3;
@@ -97,7 +98,7 @@ export function getMelodyNoteImportance(
 function getMeasureMelodyEvents(
   measureNotes: PlacedNote[],
   getRenderedPitchFn: (note: PlacedNote) => string,
-  isFinalMeasure = false
+  isFinalMeasure = false,
 ) {
   return measureNotes.flatMap((note, index) => {
     if (note.kind === "rest") return [];
@@ -122,15 +123,22 @@ function getIntervalDistance(a: number, b: number) {
   return Math.min(interval, 12 - interval);
 }
 
-export function getIntervalDissonancePenalty(melodyPc: number, chordPc: number) {
-  return INTERVAL_DISSONANCE_PENALTIES[getIntervalDistance(melodyPc, chordPc)] ?? 0;
+export function getIntervalDissonancePenalty(
+  melodyPc: number,
+  chordPc: number,
+) {
+  return (
+    INTERVAL_DISSONANCE_PENALTIES[getIntervalDistance(melodyPc, chordPc)] ?? 0
+  );
 }
 
 export function isStepwiseResolution(
   event: MelodyEvent,
-  melodyEvents: MelodyEvent[]
+  melodyEvents: MelodyEvent[],
 ) {
-  const nextEvent = melodyEvents.find((candidate) => candidate.index > event.index);
+  const nextEvent = melodyEvents.find(
+    (candidate) => candidate.index > event.index,
+  );
   if (!nextEvent) return false;
   const distance = getIntervalDistance(event.pc, nextEvent.pc);
   return distance === 1 || distance === 2;
@@ -149,7 +157,7 @@ export function scoreMelodyNoteAgainstChord(
   melodyEvents: MelodyEvent[],
   candidate: ChordCandidate,
   key: KeyContext,
-  options: MelodyFitOptions = {}
+  options: MelodyFitOptions = {},
 ): ScoreResult {
   const melodyFitPriority = options.melodyFitPriority ?? 1;
   const consonancePriority = options.consonancePriority ?? 1;
@@ -167,7 +175,7 @@ export function scoreMelodyNoteAgainstChord(
   }
 
   const strongestPenalty = Math.max(
-    ...candidate.pcs.map((pc) => getIntervalDissonancePenalty(event.pc, pc))
+    ...candidate.pcs.map((pc) => getIntervalDissonancePenalty(event.pc, pc)),
   );
   const resolvesByStep = isStepwiseResolution(event, melodyEvents);
   const scaleCompatible = getScalePcs(key).includes(event.pc);
@@ -209,20 +217,22 @@ export function scoreMelodyFit(
   melodyNotes: PlacedNote[],
   getRenderedPitchFn: (note: PlacedNote) => string,
   key: KeyContext,
-  options: MelodyFitOptions = {}
+  options: MelodyFitOptions = {},
 ): ScoreResult {
   const melodyEvents = getMeasureMelodyEvents(
     melodyNotes,
     getRenderedPitchFn,
-    options.isFinalMeasure
+    options.isFinalMeasure,
   );
   if (melodyEvents.length === 0) return { points: 0, reasons: [] };
 
   const reasons: string[] = [];
   const scoreParts = melodyEvents.map((event) =>
-    scoreMelodyNoteAgainstChord(event, melodyEvents, candidate, key, options)
+    scoreMelodyNoteAgainstChord(event, melodyEvents, candidate, key, options),
   );
-  const matchingNotes = melodyEvents.filter(({ pc }) => candidate.pcs.includes(pc));
+  const matchingNotes = melodyEvents.filter(({ pc }) =>
+    candidate.pcs.includes(pc),
+  );
   const importantMatch = matchingNotes.some((event) => event.importance >= 4);
 
   if (importantMatch) {
@@ -249,7 +259,7 @@ export function scoreMelodyFit(
 
 export function scoreKeyFit(
   candidate: ChordCandidate,
-  key: KeyContext
+  key: KeyContext,
 ): ScoreResult {
   if (candidate.keyFit === "diatonic") {
     return {
@@ -289,7 +299,7 @@ function isSuspendedQuality(quality: ChordQuality) {
 function scoreBassMotion(
   candidate: ChordCandidate,
   previousChord: ChordCandidate,
-  weight: number
+  weight: number,
 ): ScoreResult {
   const reasons: string[] = [];
   let points = 0;
@@ -299,7 +309,7 @@ function scoreBassMotion(
 
   if (candidate.inversion && candidate.bassName) {
     reasons.push(
-      `Uses an inversion to put ${getNoteNameLabel(candidate.bassName)} in the bass`
+      `Uses an inversion to put ${getNoteNameLabel(candidate.bassName)} in the bass`,
     );
   }
 
@@ -324,7 +334,7 @@ function scoreBassMotion(
 export function scoreStyle(
   candidate: ChordCandidate,
   style: StyleOption,
-  context: ChordScoreContext
+  context: ChordScoreContext,
 ): ScoreResult {
   const reasons: string[] = [];
   let points = 0;
@@ -361,32 +371,14 @@ export function scoreStyle(
     }
   }
 
-  if (style === "bluesy") {
-    if (candidate.quality === "dom7") {
-      points += 4;
-      reasons.push("Adds blues color with a dominant 7 chord");
-    }
-
-    if (candidate.quality === "dom7" && [1, 4, 5].includes(candidate.degree)) {
-      points += 3;
-      reasons.push("Uses a blues-friendly I7, IV7, or V7 chord");
-    }
-  }
-
-  // Bass motion is driven by descendingBassWeight on the AI path. On the
-  // dropdown path it is gated on the "descendingBass" style at full strength,
-  // preserving the engine's original behavior.
-  const descendingBassWeight = context.preferences
-    ? context.preferences.descendingBassWeight
-    : style === "descendingBass"
-      ? 1
-      : 0;
-
+  // Bass motion is driven by descendingBassWeight on the AI path.
+  // Descending bass is a generation constraint, not a style.
+  const descendingBassWeight = context.preferences?.descendingBassWeight ?? 0;
   if (descendingBassWeight > 0 && context.previousChord) {
     const bassMotion = scoreBassMotion(
       candidate,
       context.previousChord,
-      descendingBassWeight
+      descendingBassWeight,
     );
     points += bassMotion.points;
     reasons.push(...bassMotion.reasons);
@@ -400,7 +392,7 @@ export function scoreStyle(
 // (via preserveOverallProgression / changeAmount / locked positions).
 export function scoreRevisionSimilarity(
   candidate: ChordCandidate,
-  context: ChordScoreContext
+  context: ChordScoreContext,
 ): ScoreResult {
   const target = context.revisionTarget;
   const revision = context.revision;
@@ -449,7 +441,7 @@ export function scoreRevisionSimilarity(
 // Only used on the AI path (see scoreChord).
 export function scorePreferences(
   candidate: ChordCandidate,
-  preferences: GenerationPreferences
+  preferences: GenerationPreferences,
 ): ScoreResult {
   const reasons: string[] = [];
   let points = 0;
@@ -479,7 +471,7 @@ export function scorePreferences(
 
 export function scoreProgression(
   previousChord: ChordCandidate | undefined,
-  candidate: ChordCandidate
+  candidate: ChordCandidate,
 ): ScoreResult {
   if (!previousChord) return { points: 0, reasons: [] };
 
@@ -510,7 +502,7 @@ export function scoreProgression(
 
 export function scoreChord(
   candidate: ChordCandidate,
-  context: ChordScoreContext
+  context: ChordScoreContext,
 ): ScoredChord {
   const melodyFitOptions: MelodyFitOptions = context.preferences
     ? {
@@ -529,7 +521,7 @@ export function scoreChord(
       context.measureNotes,
       context.getRenderedPitchFn,
       context.key,
-      melodyFitOptions
+      melodyFitOptions,
     ),
     scoreKeyFit(candidate, context.key),
     scoreStyle(candidate, context.style, context),
