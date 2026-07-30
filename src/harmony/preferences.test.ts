@@ -4,10 +4,59 @@ import { toGenerationPreferences } from "../ai/toGenerationPreferences";
 import {
   applyHarmonyPreferencePatch,
   DEFAULT_HARMONY_PROFILE,
+  resolveCreativeRevisionPreferences,
+  resolveHarmonyPreferences,
 } from "./preferences";
-import { resolveHarmonyPreferences } from "../harmony/preferences";
 
 describe("default harmony profile", () => {
+  //style-switching tests
+  it("replaces the jazzy profile when switching to simple", () => {
+    const active = {
+      ...DEFAULT_HARMONY_PROFILE,
+      style: "jazzy" as const,
+      complexity: 0.8,
+      dissonanceTolerance: 0.5,
+      preferSevenths: true,
+      preferSuspensions: true,
+    };
+
+    const interpreted = {
+      ...DEFAULT_HARMONY_PROFILE,
+      style: "simple" as const,
+      complexity: 0,
+      dissonanceTolerance: 0,
+      preferSevenths: false,
+      preferSuspensions: false,
+    };
+
+    const resolved = resolveCreativeRevisionPreferences(active, interpreted, {
+      complexityDelta: -0.5,
+    });
+
+    expect(resolved).toEqual(interpreted);
+  });
+  it("applies a relative patch when the style is unchanged", () => {
+    const active = {
+      ...DEFAULT_HARMONY_PROFILE,
+      style: "simple" as const,
+      complexity: 0.6,
+      cadenceStrength: 0.7,
+    };
+
+    const interpreted = {
+      ...DEFAULT_HARMONY_PROFILE,
+      style: "simple" as const,
+      complexity: 0,
+      cadenceStrength: 0,
+    };
+
+    const resolved = resolveCreativeRevisionPreferences(active, interpreted, {
+      complexityDelta: -0.2,
+    });
+
+    expect(resolved.complexity).toBeCloseTo(0.4);
+    expect(resolved.cadenceStrength).toBe(0.7);
+  });
   it("blank interpretation defaults to the centralized high-consonance profile", () => {
     expect(toGenerationPreferences(DEFAULT_INTERPRETED_STYLE)).toEqual(
       DEFAULT_HARMONY_PROFILE,

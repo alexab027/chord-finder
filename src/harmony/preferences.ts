@@ -61,3 +61,18 @@ export function resolveHarmonyPreferences(
     style: options.style ?? base.style,
   };
 }
+export function resolveCreativeRevisionPreferences(
+  active: HarmonyPreferences,
+  interpreted: HarmonyPreferences,
+  patch: HarmonyPreferencePatch = {},
+): HarmonyPreferences {
+  const styleChanged = interpreted.style !== active.style;
+
+  if (styleChanged) {
+    return { ...interpreted };
+  }
+
+  return resolveHarmonyPreferences(active, {
+    patch,
+  });
+}

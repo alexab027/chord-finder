@@ -18,7 +18,10 @@ import {
   type ChordEditAction,
 } from "../harmony/actions";
 import { parsePureDirectEdits } from "../harmony/directEditParser";
-import { resolveHarmonyPreferences } from "../harmony/preferences";
+import {
+  resolveHarmonyPreferences,
+  resolveCreativeRevisionPreferences,
+} from "../harmony/preferences";
 import { useHarmonyMessages } from "./chord-finder/useHarmonyMessages";
 import type {
   DurationName,
@@ -418,12 +421,13 @@ export default function Staff() {
       changeAmount: 0.3,
       requestedChanges: {},
     };
-    const resolvedPreferences = resolveHarmonyPreferences(
-      toGenerationPreferences(baseInterpretation),
-      {
-        style: data.primaryStyle,
-        patch: revisionIntent.requestedChanges,
-      },
+    const activePreferences = toGenerationPreferences(baseInterpretation);
+    const interpretedPreferences = toGenerationPreferences(data);
+
+    const resolvedPreferences = resolveCreativeRevisionPreferences(
+      activePreferences,
+      interpretedPreferences,
+      revisionIntent.requestedChanges,
     );
 
     const effectivePreferences: GenerationPreferences = {
