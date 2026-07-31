@@ -12,6 +12,11 @@ import type {
 import { buildKeyChords } from "./chords";
 import { scoreChord } from "./chordScoring";
 
+export type RankedProgression = {
+  progression: ScoredChord[];
+  totalScore: number;
+};
+
 // general for now, may have to edit or add alt fn later if user requests dissonance
 const CHORD_TRANSITIONS: Record<KeyMode, Record<number, number[]>> = {
   major: {
@@ -197,14 +202,14 @@ function scoreChordPath(
   };
 }
 
-export function chooseProgression(
+export function rankProgressions(
   key: KeyContext,
   measures: PlacedNote[][],
   getRenderedPitchFn: (note: PlacedNote) => string,
   style: StyleOption,
   preferences?: GenerationPreferences,
   revision?: RevisionContext,
-) {
+): RankedProgression[] {
   const chords = buildKeyChords(key);
   const startDegrees = key.mode === "major" ? [1, 6, 4] : [1, 6, 3];
   const paths = startDegrees.flatMap((degree) =>
@@ -226,11 +231,28 @@ export function chooseProgression(
     )
     .sort((a, b) => b.score - a.score);
 
-  // Deterministic: always return the highest-scored path. This previously
-  // picked randomly from a top-scoring window, which made identical requests
-  // produce different progressions. Array.sort is stable, so score ties resolve
-  // to the first-generated path and the result is reproducible across calls.
-  // (Exposing the full ranked pool for multi-candidate previews is a separate,
-  // later change; today's callers want a single best progression.)
-  return rankedPaths[0]?.scoredChords ?? [];
+  return rankedPaths.map(({ scoredChords, score }) => ({
+    progression: scoredChords,
+    totalScore: score,
+  }));
+}
+
+export function chooseProgression(
+  key: KeyContext,
+  measures: PlacedNote[][],
+  getRenderedPitchFn: (note: PlacedNote) => string,
+  style: StyleOption,
+  preferences?: GenerationPreferences,
+  revision?: RevisionContext,
+) {
+  return (
+    rankProgressions(
+      key,
+      measures,
+      getRenderedPitchFn,
+      style,
+      preferences,
+      revision,
+    )[0]?.progression ?? []
+  );
 }
