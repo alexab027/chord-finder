@@ -23,6 +23,8 @@ import {
   resolveCreativeRevisionPreferences,
 } from "../harmony/preferences";
 import { useHarmonyMessages } from "./chord-finder/useHarmonyMessages";
+import { buildCandidateFixtures } from "./chord-finder/candidateFixtures";
+import { useCandidatePreview } from "./chord-finder/useCandidatePreview";
 import type {
   DurationName,
   GenerationMode,
@@ -107,8 +109,17 @@ export default function Staff() {
     pushUserMessage,
     pushAssistantMessage,
     pushProgressionCard,
+    pushCandidateMessage,
     pushExplanationMessage,
   } = useHarmonyMessages();
+  const {
+    candidateSet,
+    openCandidatePreview,
+    previewCandidate,
+    markCandidateSelected,
+    markCandidateCancelled,
+    clearCandidatePreview,
+  } = useCandidatePreview();
 
   // The full scored progression behind the rendered chords. Kept in a ref (not
   // rendered) so revisions can pass the current chord identities into scoring.
@@ -303,6 +314,68 @@ export default function Staff() {
     }
   }
 
+  function openCreativeCandidatePreview({
+    primaryProgression,
+    generatedKey,
+    style,
+    preferences,
+    interpretation,
+    commitLabel,
+    requestedActions = [],
+  }: {
+    primaryProgression: ScoredChord[];
+    generatedKey: ReturnType<typeof getGenerationKey>;
+    style: StyleOption;
+    preferences: GenerationPreferences;
+    interpretation: InterpretedStyle;
+    commitLabel: "Generated" | "Updated";
+    requestedActions?: ChordEditAction[];
+  }) {
+    const fixtures = buildCandidateFixtures(
+      generatedKey,
+      style,
+      primaryProgression,
+    );
+    const candidates = fixtures.map((fixture) => {
+      const progression = applyRequestedActions(
+        fixture.progression,
+        requestedActions,
+        generatedKey,
+      );
+
+      return {
+        ...fixture,
+        progression,
+        voicedProgression: voiceProgression(
+          progression,
+          measures,
+          getRenderedPitch,
+          preferences,
+        ),
+      };
+    });
+
+    if (candidates.length !== 3) {
+      setAiError("Could not prepare three progression previews.");
+      return;
+    }
+
+    const nextCandidateSet = openCandidatePreview({
+      keyLabel: generatedKey.label,
+      commitLabel,
+      baseProgression: lastProgressionRef.current,
+      baseVoicedProgression: chordMeasures.map((measure) => [...measure]),
+      baseInterpretation: aiInterpretation,
+      resultInterpretation: interpretation,
+      candidates,
+    });
+    const firstCandidate = nextCandidateSet?.candidates[0];
+    if (!nextCandidateSet || !firstCandidate) return;
+
+    setChordMeasures(firstCandidate.voicedProgression);
+    pushCandidateMessage(nextCandidateSet.id, nextCandidateSet.candidates);
+  }
+
   function handleGenerateNewProgression(
     normalizedPrompt: string,
     data?: HarmonyRouterResponse,
@@ -313,11 +386,8 @@ export default function Staff() {
     );
     const requestedActions = data?.actions ?? [];
 
-    if (data) {
-      setAiInterpretation(data);
-    } else {
-      setAiInterpretation(DEFAULT_INTERPRETED_STYLE);
-    }
+    const resultInterpretation: InterpretedStyle =
+      data ?? DEFAULT_INTERPRETED_STYLE;
 
     const generatedKey = getGenerationKey(
       keySignature,
@@ -333,18 +403,15 @@ export default function Staff() {
       effectiveStyle,
       preferences,
     );
-    const finalProgression = applyRequestedActions(
-      baseProgression,
-      requestedActions,
+    openCreativeCandidatePreview({
+      primaryProgression: baseProgression,
       generatedKey,
-    );
-
-    renderProgression(
-      finalProgression,
-      generatedKey.label,
-      "Generated",
+      style: effectiveStyle,
       preferences,
-    );
+      interpretation: resultInterpretation,
+      commitLabel: "Generated",
+      requestedActions,
+    });
     setPendingClarification(null);
   }
 
@@ -466,8 +533,6 @@ export default function Staff() {
       playabilityRequired: effectivePreferences.playabilityRequired,
       summary: data.summary || baseInterpretation.summary,
     };
-    setAiInterpretation(appliedInterpretation);
-
     const baseProgression = chooseProgression(
       generatedKey,
       measures,
@@ -476,19 +541,84 @@ export default function Staff() {
       effectivePreferences,
       revision,
     );
-    const finalProgression = applyRequestedActions(
-      baseProgression,
-      data.actions ?? [],
+    openCreativeCandidatePreview({
+      primaryProgression: baseProgression,
       generatedKey,
-    );
-
-    renderProgression(
-      finalProgression,
-      generatedKey.label,
-      "Updated",
-      effectivePreferences,
-    );
+      style: effectiveStyle,
+      preferences: effectivePreferences,
+      interpretation: appliedInterpretation,
+      commitLabel: "Updated",
+    });
     setPendingClarification(null);
+  }
+
+  function handlePreviewCandidate(
+    candidateSetId: string,
+    candidateId: string,
+  ) {
+    if (
+      !candidateSet ||
+      candidateSet.id !== candidateSetId ||
+      candidateSet.status !== "previewing"
+    ) {
+      return;
+    }
+
+    const candidate = candidateSet.candidates.find(
+      (item) => item.id === candidateId,
+    );
+    if (!candidate) return;
+
+    previewCandidate(candidateSetId, candidateId);
+    setChordMeasures(candidate.voicedProgression);
+  }
+
+  function handleSelectCandidate(candidateSetId: string) {
+    if (
+      !candidateSet ||
+      candidateSet.id !== candidateSetId ||
+      candidateSet.status !== "previewing"
+    ) {
+      return;
+    }
+
+    const selectedCandidate = candidateSet.candidates.find(
+      (candidate) => candidate.id === candidateSet.previewedCandidateId,
+    );
+    if (!selectedCandidate) {
+      setAiError("The previewed progression is no longer available.");
+      return;
+    }
+
+    lastProgressionRef.current = selectedCandidate.progression;
+    setChordMeasures(selectedCandidate.voicedProgression);
+    setAiInterpretation(candidateSet.resultInterpretation);
+    pushProgressionCard(
+      candidateSet.commitLabel,
+      candidateSet.keyLabel,
+      selectedCandidate.progression,
+    );
+    markCandidateSelected(candidateSetId);
+    setPendingClarification(null);
+    setAiError(null);
+  }
+
+  function handleCancelCandidate(candidateSetId: string) {
+    if (
+      !candidateSet ||
+      candidateSet.id !== candidateSetId ||
+      candidateSet.status !== "previewing"
+    ) {
+      return;
+    }
+
+    lastProgressionRef.current = candidateSet.baseProgression;
+    setChordMeasures(
+      candidateSet.baseVoicedProgression.map((measure) => [...measure]),
+    );
+    setAiInterpretation(candidateSet.baseInterpretation);
+    markCandidateCancelled(candidateSetId);
+    setAiError(null);
   }
 
   // Direct-edit fast path. Applies pre-parsed exact edits to the current
@@ -800,11 +930,16 @@ export default function Staff() {
     setAiInterpretation(null);
     setPendingClarification(null);
     lastProgressionRef.current = null;
+    clearCandidatePreview();
     pushAssistantMessage("Chord progression cleared.");
   }
 
   const hasNotes = measures.some((measure) => measure.length > 0);
   const hasProgression = chordMeasures.some((measure) => measure.length > 0);
+  const hasCommittedProgression =
+    candidateSet?.status === "previewing"
+      ? Boolean(candidateSet.baseProgression?.length)
+      : hasProgression;
 
   return (
     <div className="space-y-8">
@@ -863,14 +998,18 @@ export default function Staff() {
       </section>
 
       <HarmonyChat
+        candidatePreview={candidateSet}
         composerValue={stylePrompt}
         error={aiError}
-        hasProgression={hasProgression}
+        hasProgression={hasCommittedProgression}
         helperText={PROMPT_HELPER_TEXT}
         isExplaining={isExplaining}
         isGenerating={isGenerating}
         messages={messages}
+        onCancelCandidate={handleCancelCandidate}
         onComposerChange={setStylePrompt}
+        onPreviewCandidate={handlePreviewCandidate}
+        onSelectCandidate={handleSelectCandidate}
         onSubmit={handleGenerateProgression}
         placeholder={hasProgression ? REVISION_PLACEHOLDER : FRESH_PLACEHOLDER}
       />

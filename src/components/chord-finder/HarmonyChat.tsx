@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import type { CurrentProgressionItem } from "../../music/progressionPresentation";
+import type { CandidateRole, CandidateSet } from "./useCandidatePreview";
 
 export type ChatMessage =
   | { id: string; kind: "text"; role: "user" | "assistant"; text: string }
@@ -16,7 +17,22 @@ export type ChatMessage =
       kind: "explanation";
       overview: string;
       measures: Array<{ measure: number; chord: string; explanation: string }>;
+    }
+  | {
+      id: string;
+      kind: "candidates";
+      candidateSetId: string;
+      candidates: Array<{
+        id: string;
+        role: CandidateRole;
+        items: CurrentProgressionItem[];
+      }>;
     };
+
+type CandidatePreviewSummary = Pick<
+  CandidateSet,
+  "id" | "previewedCandidateId" | "status"
+>;
 
 type HarmonyChatProps = {
   messages: readonly ChatMessage[];
@@ -26,9 +42,19 @@ type HarmonyChatProps = {
   isGenerating: boolean;
   isExplaining: boolean;
   hasProgression: boolean;
+  candidatePreview: CandidatePreviewSummary | null;
   error: string | null;
   onComposerChange: (value: string) => void;
   onSubmit: () => void;
+  onPreviewCandidate: (candidateSetId: string, candidateId: string) => void;
+  onSelectCandidate: (candidateSetId: string) => void;
+  onCancelCandidate: (candidateSetId: string) => void;
+};
+
+const CANDIDATE_ROLE_LABELS: Record<CandidateRole, string> = {
+  closest: "Closest",
+  moderate: "More Different",
+  distinct: "Fresh Alternative",
 };
 
 function TextMessage({
@@ -129,13 +155,131 @@ function ExplanationMessage({
   );
 }
 
-function ChatEntry({ message }: { message: ChatMessage }) {
+function CandidateMessage({
+  candidateSetId,
+  candidates,
+  candidatePreview,
+  onPreviewCandidate,
+  onSelectCandidate,
+  onCancelCandidate,
+}: {
+  candidateSetId: string;
+  candidates: Extract<ChatMessage, { kind: "candidates" }>["candidates"];
+  candidatePreview: CandidatePreviewSummary | null;
+  onPreviewCandidate: (candidateSetId: string, candidateId: string) => void;
+  onSelectCandidate: (candidateSetId: string) => void;
+  onCancelCandidate: (candidateSetId: string) => void;
+}) {
+  const isCurrentSet = candidatePreview?.id === candidateSetId;
+  const isPreviewing = isCurrentSet && candidatePreview.status === "previewing";
+
+  return (
+    <article className="space-y-3 bg-[var(--surface)] px-4 py-4">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+        Harmony
+      </div>
+      <div>
+        <div className="font-semibold text-[var(--text)]">
+          Choose a progression
+        </div>
+        <p className="mt-1 text-xs text-[var(--text-muted)]">
+          Preview each option on the staff, then select one or cancel.
+        </p>
+      </div>
+
+      <div className="grid gap-2">
+        {candidates.map((candidate, index) => {
+          const isPreviewed =
+            isCurrentSet &&
+            candidatePreview.previewedCandidateId === candidate.id;
+
+          return (
+            <button
+              aria-pressed={isPreviewed}
+              className={
+                isPreviewed
+                  ? "rounded-md border border-[var(--accent-border)] bg-[color-mix(in_srgb,var(--accent)_10%,white)] px-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
+                  : "rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-3 text-left hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+              }
+              disabled={!isPreviewing}
+              key={candidate.id}
+              onClick={() =>
+                onPreviewCandidate(candidateSetId, candidate.id)
+              }
+              type="button"
+            >
+              <span className="block text-sm font-semibold text-[var(--text)]">
+                Option {index + 1} — {CANDIDATE_ROLE_LABELS[candidate.role]}
+              </span>
+              <span className="mt-1 block text-sm text-[var(--text-muted)]">
+                {candidate.items
+                  .map((item) => item.absoluteSymbol)
+                  .join(" – ")}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {isPreviewing ? (
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button
+            className="h-9 rounded-md border border-[var(--accent-border)] bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:bg-[var(--accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
+            onClick={() => onSelectCandidate(candidateSetId)}
+            type="button"
+          >
+            Select
+          </button>
+          <button
+            className="h-9 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm font-semibold text-[var(--text)] hover:bg-[var(--surface-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
+            onClick={() => onCancelCandidate(candidateSetId)}
+            type="button"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <p className="text-xs font-medium text-[var(--text-muted)]">
+          {isCurrentSet && candidatePreview.status === "selected"
+            ? "Selection committed."
+            : "Preview closed."}
+        </p>
+      )}
+    </article>
+  );
+}
+
+function ChatEntry({
+  message,
+  candidatePreview,
+  onPreviewCandidate,
+  onSelectCandidate,
+  onCancelCandidate,
+}: {
+  message: ChatMessage;
+  candidatePreview: CandidatePreviewSummary | null;
+  onPreviewCandidate: (candidateSetId: string, candidateId: string) => void;
+  onSelectCandidate: (candidateSetId: string) => void;
+  onCancelCandidate: (candidateSetId: string) => void;
+}) {
   if (message.kind === "text") {
     return <TextMessage role={message.role} text={message.text} />;
   }
   if (message.kind === "progression") {
     return (
       <ProgressionMessage heading={message.heading} items={message.items} />
+    );
+  }
+  if (message.kind === "candidates") {
+    return (
+      <CandidateMessage
+        candidatePreview={candidatePreview}
+        candidates={message.candidates}
+        candidateSetId={message.candidateSetId}
+        onCancelCandidate={onCancelCandidate}
+        onPreviewCandidate={onPreviewCandidate}
+        onSelectCandidate={onSelectCandidate}
+      />
     );
   }
   return (
@@ -154,9 +298,13 @@ export default function HarmonyChat({
   isGenerating,
   isExplaining,
   hasProgression,
+  candidatePreview,
   error,
   onComposerChange,
   onSubmit,
+  onPreviewCandidate,
+  onSelectCandidate,
+  onCancelCandidate,
 }: HarmonyChatProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const submitLabel = isGenerating
@@ -166,6 +314,7 @@ export default function HarmonyChat({
     : hasProgression
       ? "Update progression"
       : "Generate progression";
+  const isPreviewingCandidates = candidatePreview?.status === "previewing";
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -181,7 +330,7 @@ export default function HarmonyChat({
     }
 
     event.preventDefault();
-    if (!isGenerating) onSubmit();
+    if (!isGenerating && !isPreviewingCandidates) onSubmit();
   }
 
   return (
@@ -203,7 +352,14 @@ export default function HarmonyChat({
         ) : (
           <div className="divide-y divide-[var(--border)]">
             {messages.map((message) => (
-              <ChatEntry key={message.id} message={message} />
+              <ChatEntry
+                candidatePreview={candidatePreview}
+                key={message.id}
+                message={message}
+                onCancelCandidate={onCancelCandidate}
+                onPreviewCandidate={onPreviewCandidate}
+                onSelectCandidate={onSelectCandidate}
+              />
             ))}
             {isExplaining && (
               <article className="bg-[var(--surface)] px-4 py-4">
@@ -231,6 +387,7 @@ export default function HarmonyChat({
           <textarea
             className="mt-1 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
             maxLength={500}
+            disabled={isPreviewingCandidates}
             onChange={(event) => onComposerChange(event.target.value)}
             onKeyDown={handleComposerKeyDown}
             placeholder={placeholder}
@@ -241,15 +398,15 @@ export default function HarmonyChat({
 
         <button
           className={
-            isGenerating
+            isGenerating || isPreviewingCandidates
               ? "mt-3 h-10 cursor-not-allowed rounded-md border border-[var(--border)] bg-[#ecece8] px-4 text-sm font-semibold text-[var(--text-muted)]"
               : "mt-3 h-10 rounded-md border border-[var(--accent-border)] bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:bg-[var(--accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
           }
-          disabled={isGenerating}
+          disabled={isGenerating || isPreviewingCandidates}
           onClick={onSubmit}
           type="button"
         >
-          {submitLabel}
+          {isPreviewingCandidates ? "Choose an option above" : submitLabel}
         </button>
 
         {error && <p className="mt-3 text-xs text-[var(--warning)]">{error}</p>}

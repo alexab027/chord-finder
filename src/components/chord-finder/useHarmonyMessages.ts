@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { ScoredChord } from "../../music/types";
 import { buildProgressionIdentityItems } from "../../music/progressionPresentation";
 import type { ChatMessage } from "./HarmonyChat";
+import type { ProgressionCandidate } from "./useCandidatePreview";
 
 function formatKeyForHeading(keyLabel: string) {
   return keyLabel.replace(/\s+major$/i, "");
@@ -50,6 +51,23 @@ export function useHarmonyMessages() {
       items: buildProgressionIdentityItems(progression),
     });
   }
+
+  function pushCandidateMessage(
+    candidateSetId: string,
+    candidates: ProgressionCandidate[],
+  ) {
+    pushMessage({
+      id: nextMessageId(),
+      kind: "candidates",
+      candidateSetId,
+      candidates: candidates.map((candidate) => ({
+        id: candidate.id,
+        role: candidate.role,
+        items: buildProgressionIdentityItems(candidate.progression),
+      })),
+    });
+  }
+
   function pushExplanationMessage(
     overview: string,
     measures: Array<{
@@ -71,6 +89,7 @@ export function useHarmonyMessages() {
     pushUserMessage,
     pushAssistantMessage,
     pushProgressionCard,
+    pushCandidateMessage,
     pushExplanationMessage,
   };
 }
