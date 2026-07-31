@@ -1,0 +1,167 @@
+import { describe, expect, it } from "vitest";
+import { DEFAULT_INTERPRETED_STYLE } from "../../ai/types";
+import { toGenerationPreferences } from "../../ai/toGenerationPreferences";
+import { buildCandidatePool } from "../../harmony/candidates/buildCandidatePool";
+import { candidateHash } from "../../harmony/candidates/candidateHash";
+import { buildNamedChord } from "../../music/chords";
+import { rankProgressions } from "../../music/chordGeneration";
+import type {
+  KeyContext,
+  PlacedChord,
+  PlacedNote,
+  RevisionContext,
+  ScoredChord,
+} from "../../music/types";
+import { prepareVisibleCandidates } from "./useHarmonyController";
+
+const cMajor: KeyContext = {
+  signature: "C",
+  label: "C major",
+  tonicName: "c",
+  tonicPc: 0,
+  mode: "major",
+};
+
+const aMinor: KeyContext = {
+  signature: "C",
+  label: "A minor",
+  tonicName: "a",
+  tonicPc: 9,
+  mode: "minor",
+};
+
+const emptyMeasures: PlacedNote[][] = [[], [], [], []];
+const noPitch = () => "";
+
+function visibleVoicing(progression: ScoredChord[]): PlacedChord[][] {
+  return progression.map(({ chord }) => [
+    {
+      slot: 0,
+      duration: "w",
+      durationSlots: 8,
+      pitches: ["c/3", "e/3", "g/3"],
+      symbol: chord.absoluteSymbol,
+    },
+  ]);
+}
+
+function outsideGrammarBase(): ScoredChord[] {
+  return ["Dm7", "E7", "Am7", "Fmaj7"].map((symbol) => ({
+    chord: buildNamedChord(aMinor, symbol)!,
+    score: 0,
+    reasons: [],
+  }));
+}
+
+function revisionContext(base: ScoredChord[]): RevisionContext {
+  return {
+    targets: base.map(({ chord }) => ({
+      degree: chord.degree,
+      rootPc: chord.rootPc,
+      quality: chord.quality,
+      bassPc: chord.bassPc,
+      inversion: chord.inversion,
+    })),
+    preserveOverallProgression: true,
+    preserveChordPositions: [],
+    changeAmount: 0.3,
+  };
+}
+
+describe("prepareVisibleCandidates", () => {
+  it("voices only the earned visible candidates from the larger real pool", () => {
+    const preferences = toGenerationPreferences(DEFAULT_INTERPRETED_STYLE);
+    const pool = buildCandidatePool({
+      mode: "generate_new",
+      key: cMajor,
+      measures: emptyMeasures,
+      getRenderedPitchFn: noPitch,
+      style: preferences.style,
+      preferences,
+    });
+    let voicingCalls = 0;
+    const candidates = prepareVisibleCandidates({
+      mode: "generate_new",
+      key: cMajor,
+      measures: emptyMeasures,
+      getRenderedPitchFn: noPitch,
+      style: preferences.style,
+      preferences,
+      currentProgression: null,
+      voiceProgressionFn: (progression) => {
+        voicingCalls += 1;
+        return visibleVoicing(progression);
+      },
+    });
+
+    expect(pool.length).toBeGreaterThan(candidates.length);
+    expect(candidates.map(({ role }) => role)).toEqual([
+      "closest",
+      "moderate",
+      "distinct",
+    ]);
+    expect(voicingCalls).toBe(candidates.length);
+    expect(new Set(candidates.map(({ symbolicHash }) => symbolicHash)).size).toBe(
+      candidates.length,
+    );
+  });
+
+  it("excludes the committed progression from an explicit generate-new request", () => {
+    const preferences = toGenerationPreferences(DEFAULT_INTERPRETED_STYLE);
+    const current = rankProgressions(
+      cMajor,
+      emptyMeasures,
+      noPitch,
+      preferences.style,
+      preferences,
+    )[0].progression;
+    const candidates = prepareVisibleCandidates({
+      mode: "generate_new",
+      key: cMajor,
+      measures: emptyMeasures,
+      getRenderedPitchFn: noPitch,
+      style: preferences.style,
+      preferences,
+      currentProgression: current,
+      voiceProgressionFn: visibleVoicing,
+    });
+
+    expect(
+      candidates.some(
+        ({ symbolicHash }) => symbolicHash === candidateHash(current),
+      ),
+    ).toBe(false);
+  });
+
+  it("preserves an unusual selected root path in a real revision candidate", () => {
+    const base = outsideGrammarBase();
+    const preferences = {
+      ...toGenerationPreferences(DEFAULT_INTERPRETED_STYLE),
+      style: "simple" as const,
+    };
+    const candidates = prepareVisibleCandidates({
+      mode: "revise_existing",
+      key: aMinor,
+      measures: emptyMeasures,
+      getRenderedPitchFn: noPitch,
+      style: preferences.style,
+      preferences,
+      revision: revisionContext(base),
+      currentProgression: base,
+      voiceProgressionFn: visibleVoicing,
+    });
+    const baseRoots = base.map(({ chord }) => chord.rootPc);
+
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(candidates[0].role).toBe("closest");
+    expect(candidates[0].progression.map(({ chord }) => chord.rootPc)).toEqual(
+      baseRoots,
+    );
+    expect(candidates[0].progression.map(({ chord }) => chord.quality)).toEqual([
+      "triad",
+      "triad",
+      "triad",
+      "triad",
+    ]);
+  });
+});

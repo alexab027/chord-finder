@@ -47,9 +47,12 @@ export type RoleSelectedCandidate = CandidatePoolEntry & {
 
 export type ProgressionCandidate = {
   id: string;
+  symbolicHash: string;
   role: CandidateRole;
   progression: ScoredChord[];
   voicedProgression: PlacedChord[][];
+  totalScore: number;
+  distanceFromBase?: number;
 };
 
 export type CandidateSet = {

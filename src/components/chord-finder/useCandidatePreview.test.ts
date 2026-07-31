@@ -16,21 +16,27 @@ function fixtureCandidateSet(): CandidateSet {
     candidates: [
       {
         id: "closest",
+        symbolicHash: "closest-hash",
         role: "closest",
         progression: [],
         voicedProgression: [[], [], [], []],
+        totalScore: 3,
       },
       {
         id: "moderate",
+        symbolicHash: "moderate-hash",
         role: "moderate",
         progression: [],
         voicedProgression: [[], [], [], []],
+        totalScore: 2,
       },
       {
         id: "distinct",
+        symbolicHash: "distinct-hash",
         role: "distinct",
         progression: [],
         voicedProgression: [[], [], [], []],
+        totalScore: 1,
       },
     ],
     previewedCandidateId: "closest",

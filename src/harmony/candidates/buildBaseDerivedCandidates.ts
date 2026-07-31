@@ -52,6 +52,21 @@ function getRootPreservingQualityOptions(
   );
 }
 
+function buildQualityCombinations(
+  optionsByMeasure: readonly (readonly ChordCandidate[])[],
+  measureIndex = 0,
+  current: readonly ChordCandidate[] = [],
+): ChordCandidate[][] {
+  if (measureIndex === optionsByMeasure.length) return [[...current]];
+
+  return optionsByMeasure[measureIndex].flatMap((candidate) =>
+    buildQualityCombinations(optionsByMeasure, measureIndex + 1, [
+      ...current,
+      candidate,
+    ]),
+  );
+}
+
 export function buildBaseDerivedCandidates(
   baseProgression: readonly ScoredChord[],
   context: CandidateGenerationContext,
@@ -65,25 +80,18 @@ export function buildBaseDerivedCandidates(
   const baseChords = baseProgression.map(({ chord }) => chord);
   const rescoredBase = scoreCandidate(baseChords, "base_rescored", context);
   const keyChords = buildKeyChords(context.key);
-  const alternatives: CandidatePoolEntry[] = [];
-
-  baseProgression.forEach((scoredChord, measureIndex) => {
-    for (const alternative of getRootPreservingQualityOptions(
-      scoredChord,
-      keyChords,
-    )) {
-      const candidateChords = baseChords.map((chord, index) =>
-        index === measureIndex ? alternative : chord,
-      );
-      alternatives.push(
-        scoreCandidate(
-          candidateChords,
-          "base_quality_alternative",
-          context,
-        ),
-      );
-    }
+  const optionsByMeasure = baseProgression.map((scoredChord) => {
+    const options = getRootPreservingQualityOptions(scoredChord, keyChords);
+    return options.length > 0 ? options : [scoredChord.chord];
   });
+  const alternatives = buildQualityCombinations(optionsByMeasure).map(
+    (candidateChords) =>
+      scoreCandidate(
+        candidateChords,
+        "base_quality_alternative",
+        context,
+      ),
+  );
 
   const uniqueAlternatives = deduplicateCandidates(alternatives)
     .filter(({ symbolicHash }) => symbolicHash !== rescoredBase.symbolicHash)

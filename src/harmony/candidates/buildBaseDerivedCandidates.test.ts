@@ -51,7 +51,7 @@ describe("buildBaseDerivedCandidates", () => {
     expect(Number.isFinite(candidates[0].totalScore)).toBe(true);
   });
 
-  it("creates distinct one-position quality alternatives on the same roots", () => {
+  it("creates distinct quality alternatives on the same roots", () => {
     const base = outsideGrammarBase();
     const candidates = buildBaseDerivedCandidates(
       base,
@@ -85,7 +85,16 @@ describe("buildBaseDerivedCandidates", () => {
               chord.bassPc !== base[index].chord.bassPc ||
               (chord.inversion ?? 0) !==
                 (base[index].chord.inversion ?? 0),
-          ).length === 1,
+          ).length >= 1,
+      ),
+    ).toBe(true);
+    expect(
+      alternatives.some(
+        ({ progression }) =>
+          progression.filter(
+            ({ chord }, index) =>
+              chord.quality !== base[index].chord.quality,
+          ).length > 1,
       ),
     ).toBe(true);
     expect(new Set(candidates.map(({ symbolicHash }) => symbolicHash)).size).toBe(
