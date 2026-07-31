@@ -1,7 +1,42 @@
 import type { InterpretedStyle } from "../../ai/types";
-import type { PlacedChord, ScoredChord } from "../../music/types";
+import type {
+  GenerationPreferences,
+  KeyContext,
+  PlacedChord,
+  PlacedNote,
+  RevisionContext,
+  ScoredChord,
+  StyleOption,
+} from "../../music/types";
 
 export type CandidateRole = "closest" | "moderate" | "distinct";
+export type CandidateMode = "generate_new" | "revise_existing";
+export type CandidatePoolSource =
+  | "ranked_engine"
+  | "base_rescored"
+  | "base_quality_alternative";
+
+export type CandidatePoolEntry = {
+  symbolicHash: string;
+  progression: ScoredChord[];
+  totalScore: number;
+  source: CandidatePoolSource;
+};
+
+export type CandidateGenerationContext = {
+  key: KeyContext;
+  measures: PlacedNote[][];
+  getRenderedPitchFn: (note: PlacedNote) => string;
+  style: StyleOption;
+  preferences?: GenerationPreferences;
+  revision?: RevisionContext;
+};
+
+export type CandidatePoolOptions = {
+  maxCandidates: number;
+  maxRankedCandidates: number;
+  maxBaseCandidates: number;
+};
 
 export type ProgressionCandidate = {
   id: string;

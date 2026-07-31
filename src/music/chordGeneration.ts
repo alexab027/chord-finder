@@ -126,50 +126,28 @@ function getBestScoredChordForMeasure(
   );
 }
 
-function scoreChordPath(
-  path: number[],
-  chords: ChordCandidate[],
-  key: KeyContext,
-  measures: PlacedNote[][],
-  getRenderedPitchFn: (note: PlacedNote) => string,
-  style: StyleOption,
-  preferences?: GenerationPreferences,
-  revision?: RevisionContext,
-) {
-  const revisionFlags = revision
+function getRevisionFlags(revision?: RevisionContext) {
+  return revision
     ? {
         preserveOverallProgression: revision.preserveOverallProgression,
         changeAmount: revision.changeAmount,
       }
     : undefined;
-  const scoredChords: ScoredChord[] = [];
-  let candidateScore = 0;
+}
+
+function getProgressionTotalScore(
+  path: readonly number[],
+  scoredChords: readonly ScoredChord[],
+  key: KeyContext,
+  preferences?: GenerationPreferences,
+) {
+  const candidateScore = scoredChords.reduce(
+    (total, scoredChord) => total + scoredChord.score,
+    0,
+  );
   let transitionScore = 0;
   let cadenceScore = 0;
   let openingScore = 0;
-  let previousChord: ChordCandidate | undefined;
-
-  path.forEach((degree, measureIndex) => {
-    const measureNotes = measures[measureIndex] ?? [];
-    const scoredChord = getBestScoredChordForMeasure(degree, chords, {
-      key,
-      style,
-      measureNotes,
-      measureIndex,
-      measureCount: measures.length,
-      getRenderedPitchFn,
-      previousChord,
-      preferences,
-      revision: revisionFlags,
-      revisionTarget: revision?.targets[measureIndex],
-      revisionLocked:
-        revision?.preserveChordPositions.includes(measureIndex + 1) ?? false,
-    });
-
-    scoredChords.push(scoredChord);
-    candidateScore += scoredChord.score;
-    previousChord = scoredChord.chord;
-  });
 
   for (let i = 0; i < path.length - 1; i++) {
     transitionScore += getTransitionScore(key.mode, path[i], path[i + 1]);
@@ -191,14 +169,97 @@ function scoreChordPath(
   // Dropdown path (no preferences) leaves the original scores untouched.
   const cadenceMultiplier = preferences ? 0.5 + preferences.cadenceStrength : 1;
 
+  return (
+    candidateScore * MELODY_WEIGHT +
+    transitionScore * TRANSITION_WEIGHT +
+    cadenceScore * CADENCE_WEIGHT * cadenceMultiplier +
+    openingScore
+  );
+}
+
+export function scoreProgression(
+  progression: readonly ChordCandidate[],
+  key: KeyContext,
+  measures: PlacedNote[][],
+  getRenderedPitchFn: (note: PlacedNote) => string,
+  style: StyleOption,
+  preferences?: GenerationPreferences,
+  revision?: RevisionContext,
+): RankedProgression {
+  const revisionFlags = getRevisionFlags(revision);
+  const scoredChords: ScoredChord[] = [];
+  let previousChord: ChordCandidate | undefined;
+
+  progression.forEach((chord, measureIndex) => {
+    const scoredChord = scoreChord(chord, {
+      key,
+      style,
+      measureNotes: measures[measureIndex] ?? [],
+      measureIndex,
+      measureCount: measures.length,
+      getRenderedPitchFn,
+      previousChord,
+      preferences,
+      revision: revisionFlags,
+      revisionTarget: revision?.targets[measureIndex],
+      revisionLocked:
+        revision?.preserveChordPositions.includes(measureIndex + 1) ?? false,
+    });
+
+    scoredChords.push(scoredChord);
+    previousChord = chord;
+  });
+
+  return {
+    progression: scoredChords,
+    totalScore: getProgressionTotalScore(
+      progression.map(({ degree }) => degree),
+      scoredChords,
+      key,
+      preferences,
+    ),
+  };
+}
+
+function scoreChordPath(
+  path: number[],
+  chords: ChordCandidate[],
+  key: KeyContext,
+  measures: PlacedNote[][],
+  getRenderedPitchFn: (note: PlacedNote) => string,
+  style: StyleOption,
+  preferences?: GenerationPreferences,
+  revision?: RevisionContext,
+) {
+  const revisionFlags = getRevisionFlags(revision);
+  const scoredChords: ScoredChord[] = [];
+  let previousChord: ChordCandidate | undefined;
+
+  path.forEach((degree, measureIndex) => {
+    const measureNotes = measures[measureIndex] ?? [];
+    const scoredChord = getBestScoredChordForMeasure(degree, chords, {
+      key,
+      style,
+      measureNotes,
+      measureIndex,
+      measureCount: measures.length,
+      getRenderedPitchFn,
+      previousChord,
+      preferences,
+      revision: revisionFlags,
+      revisionTarget: revision?.targets[measureIndex],
+      revisionLocked:
+        revision?.preserveChordPositions.includes(measureIndex + 1) ?? false,
+    });
+
+    scoredChords.push(scoredChord);
+    previousChord = scoredChord.chord;
+  });
+
   return {
     path,
     scoredChords,
-    score:
-      candidateScore * MELODY_WEIGHT +
-      transitionScore * TRANSITION_WEIGHT +
-      cadenceScore * CADENCE_WEIGHT * cadenceMultiplier +
-      openingScore,
+    score: getProgressionTotalScore(path, scoredChords, key, preferences),
   };
 }
 
