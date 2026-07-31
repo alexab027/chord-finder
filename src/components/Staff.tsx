@@ -17,6 +17,7 @@ import {
   HarmonyActionError,
   type ChordEditAction,
 } from "../harmony/actions";
+import { validateCandidatePool } from "../harmony/candidates/validateCandidate";
 import { parsePureDirectEdits } from "../harmony/directEditParser";
 import {
   resolveHarmonyPreferences,
@@ -336,27 +337,30 @@ export default function Staff() {
       style,
       primaryProgression,
     );
-    const candidates = fixtures.map((fixture) => {
-      const progression = applyRequestedActions(
-        fixture.progression,
-        requestedActions,
-        generatedKey,
-      );
+    const { candidates } = validateCandidatePool(
+      fixtures.map((fixture) => {
+        const progression = applyRequestedActions(
+          fixture.progression,
+          requestedActions,
+          generatedKey,
+        );
 
-      return {
-        ...fixture,
-        progression,
-        voicedProgression: voiceProgression(
+        return {
+          ...fixture,
           progression,
-          measures,
-          getRenderedPitch,
-          preferences,
-        ),
-      };
-    });
+          voicedProgression: voiceProgression(
+            progression,
+            measures,
+            getRenderedPitch,
+            preferences,
+          ),
+        };
+      }),
+      { requireVoicing: true },
+    );
 
-    if (candidates.length !== 3) {
-      setAiError("Could not prepare three progression previews.");
+    if (candidates.length === 0) {
+      setAiError("Could not prepare any valid progression previews.");
       return;
     }
 

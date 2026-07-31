@@ -1,5 +1,6 @@
-import { buildKeyChords } from "../../music/chords";
+import { deduplicateCandidates } from "../../harmony/candidates/candidateHash";
 import type { CandidateRole } from "../../harmony/candidates/types";
+import { buildKeyChords } from "../../music/chords";
 import type {
   ChordCandidate,
   KeyContext,
@@ -31,10 +32,6 @@ const FIXTURE_PATHS: Record<KeyContext["mode"], number[][]> = {
 };
 
 const ROLES: CandidateRole[] = ["closest", "moderate", "distinct"];
-
-function progressionHash(progression: ScoredChord[]) {
-  return progression.map(({ chord }) => chord.absoluteSymbol).join("|");
-}
 
 function scoreFixtureChord(chord: ChordCandidate): ScoredChord {
   return {
@@ -77,7 +74,6 @@ export function buildCandidateFixtures(
   // Phase 3 intentionally proves preview/Select/Cancel state with deterministic
   // fixtures. Real pool ranking and candidate-role selection arrive in Phase 5.
   const progressions: ScoredChord[][] = [primaryProgression];
-  const seen = new Set([progressionHash(primaryProgression)]);
   const chords = buildKeyChords(key);
 
   for (const path of FIXTURE_PATHS[key.mode]) {
@@ -87,17 +83,16 @@ export function buildCandidateFixtures(
     });
     if (progression.length !== 4) continue;
 
-    const hash = progressionHash(progression);
-    if (seen.has(hash)) continue;
-
-    seen.add(hash);
     progressions.push(progression);
-    if (progressions.length === 3) break;
   }
 
-  return progressions.slice(0, 3).map((progression, index) => ({
-    id: `candidate-${index + 1}`,
-    role: ROLES[index],
-    progression,
-  }));
+  return deduplicateCandidates(
+    progressions.map((progression) => ({ progression })),
+  )
+    .slice(0, 3)
+    .map(({ progression }, index) => ({
+      id: `candidate-${index + 1}`,
+      role: ROLES[index],
+      progression,
+    }));
 }

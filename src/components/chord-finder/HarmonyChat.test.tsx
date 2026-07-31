@@ -76,6 +76,39 @@ describe("HarmonyChat candidate controls", () => {
     expect(markup).toContain("Choose an option above");
   });
 
+  it("renders an honest candidate count below three", () => {
+    const twoCandidateMessage: ChatMessage = {
+      ...candidateMessage,
+      candidates: candidateMessage.candidates.slice(0, 2),
+    };
+    const markup = renderToStaticMarkup(
+      <HarmonyChat
+        candidatePreview={{
+          id: "candidate-set-1",
+          previewedCandidateId: "candidate-1",
+          status: "previewing",
+        }}
+        composerValue=""
+        error={null}
+        hasProgression={false}
+        helperText="Helper"
+        isExplaining={false}
+        isGenerating={false}
+        messages={[twoCandidateMessage]}
+        onCancelCandidate={noOp}
+        onComposerChange={noOp}
+        onPreviewCandidate={noOp}
+        onSelectCandidate={noOp}
+        onSubmit={noOp}
+        placeholder="Describe harmony"
+      />,
+    );
+
+    expect(markup).toContain("Option 1 — Closest");
+    expect(markup).toContain("Option 2 — More Different");
+    expect(markup).not.toContain("Option 3");
+  });
+
   it("closes the action controls after selection", () => {
     const markup = renderToStaticMarkup(
       <HarmonyChat
