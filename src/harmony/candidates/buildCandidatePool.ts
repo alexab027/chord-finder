@@ -9,11 +9,17 @@ import type {
   CandidatePoolOptions,
 } from "./types";
 import { validateCandidatePool } from "./validateCandidate";
+import {
+  buildStyleTransformCandidates,
+  jazzColorScore,
+  progressionComplexity,
+} from "../transforms/styleTransforms";
 
 export const DEFAULT_CANDIDATE_POOL_OPTIONS: CandidatePoolOptions = {
   maxCandidates: 12,
   maxRankedCandidates: 12,
   maxBaseCandidates: 6,
+  maxStyleCandidates: 6,
 };
 
 export type BuildCandidatePoolInput = CandidateGenerationContext & {
@@ -44,6 +50,11 @@ function resolveOptions(
         DEFAULT_CANDIDATE_POOL_OPTIONS.maxBaseCandidates,
       DEFAULT_CANDIDATE_POOL_OPTIONS.maxBaseCandidates,
     ),
+    maxStyleCandidates: normalizeLimit(
+      options?.maxStyleCandidates ??
+        DEFAULT_CANDIDATE_POOL_OPTIONS.maxStyleCandidates,
+      DEFAULT_CANDIDATE_POOL_OPTIONS.maxStyleCandidates,
+    ),
   };
 }
 
@@ -51,6 +62,7 @@ function capPool(
   candidates: CandidatePoolEntry[],
   maxCandidates: number,
   reserveBaseCandidate: boolean,
+  reserveStyleCandidate: boolean,
 ) {
   if (maxCandidates === 0) return [];
 
@@ -58,21 +70,37 @@ function capPool(
     (left, right) => right.totalScore - left.totalScore,
   );
   const selected = ranked.slice(0, maxCandidates);
+  const reserved = [...selected];
   if (
-    !reserveBaseCandidate ||
-    selected.some(({ source }) => source !== "ranked_engine")
+    reserveStyleCandidate &&
+    !reserved.some(({ source }) => source === "style_transform")
   ) {
-    return selected;
+    const styleCandidate = ranked.find(
+      ({ source }) => source === "style_transform",
+    );
+    if (styleCandidate) reserved[reserved.length - 1] = styleCandidate;
+  }
+  if (
+    reserveBaseCandidate &&
+    !reserved.some(
+      ({ source }) =>
+        source === "base_rescored" || source === "base_quality_alternative",
+    )
+  ) {
+    const baseCandidate = ranked.find(
+      ({ source }) =>
+        source === "base_rescored" || source === "base_quality_alternative",
+    );
+    const replaceIndex = reserved.findLastIndex(
+      ({ source }) => source !== "style_transform",
+    );
+    if (baseCandidate && replaceIndex >= 0) {
+      reserved[replaceIndex] = baseCandidate;
+    }
   }
 
-  const bestBaseCandidate = ranked.find(
-    ({ source }) => source !== "ranked_engine",
-  );
-  if (!bestBaseCandidate) return selected;
-
-  return [...selected.slice(0, -1), bestBaseCandidate].sort(
-    (left, right) => right.totalScore - left.totalScore,
-  );
+  return [...new Map(reserved.map((item) => [item.symbolicHash, item])).values()]
+    .sort((left, right) => right.totalScore - left.totalScore);
 }
 
 export function buildCandidatePool(
@@ -99,9 +127,44 @@ export function buildCandidatePool(
           maxCandidates: options.maxBaseCandidates,
         })
       : [];
+  const styleCandidates = buildStyleTransformCandidates(
+    [...baseCandidates, ...rankedCandidates],
+    input,
+    options.maxStyleCandidates,
+  );
+  const requestedStyleTargets =
+    input.mode === "revise_existing" &&
+    input.preferences?.styleTransform &&
+    baseCandidates[0]
+      ? buildStyleTransformCandidates(
+          [baseCandidates[0]],
+          input,
+          options.maxStyleCandidates,
+        )
+      : [];
+  const satisfiesRequestedStyle = (candidate: CandidatePoolEntry) => {
+    if (!input.preferences?.styleTransform) return true;
+    if (requestedStyleTargets.length === 0) return false;
+    if (input.preferences.styleTransform === "simple") {
+      const target = Math.min(
+        ...requestedStyleTargets.map(({ progression }) =>
+          progressionComplexity(progression),
+        ),
+      );
+      return progressionComplexity(candidate.progression) <= target;
+    }
+    const target = Math.max(
+      ...requestedStyleTargets.map(({ progression }) =>
+        jazzColorScore(progression),
+      ),
+    );
+    return jazzColorScore(candidate.progression) >= target;
+  };
   const { candidates } = validateCandidatePool(
-    [...rankedCandidates, ...baseCandidates].filter(({ totalScore }) =>
-      Number.isFinite(totalScore),
+    [...rankedCandidates, ...styleCandidates, ...baseCandidates].filter(
+      (candidate) =>
+        Number.isFinite(candidate.totalScore) &&
+        satisfiesRequestedStyle(candidate),
     ),
   );
 
@@ -109,5 +172,6 @@ export function buildCandidatePool(
     candidates,
     options.maxCandidates,
     input.mode === "revise_existing" && baseCandidates.length > 0,
+    styleCandidates.length > 0,
   );
 }

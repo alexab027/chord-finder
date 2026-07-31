@@ -14,7 +14,8 @@ export type CandidateMode = "generate_new" | "revise_existing";
 export type CandidatePoolSource =
   | "ranked_engine"
   | "base_rescored"
-  | "base_quality_alternative";
+  | "base_quality_alternative"
+  | "style_transform";
 
 export type CandidatePoolEntry = {
   symbolicHash: string;
@@ -36,6 +37,7 @@ export type CandidatePoolOptions = {
   maxCandidates: number;
   maxRankedCandidates: number;
   maxBaseCandidates: number;
+  maxStyleCandidates: number;
 };
 
 export type RoleSelectedCandidate = CandidatePoolEntry & {

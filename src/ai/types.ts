@@ -1,4 +1,4 @@
-import type { StyleOption } from "@/src/music/types";
+import type { StyleIntensity, StyleOption } from "@/src/music/types";
 import type { ChordEditAction } from "@/src/harmony/actions";
 import {
   DEFAULT_HARMONY_PROFILE,
@@ -31,6 +31,8 @@ export type InterpretedStyle = {
   playabilityRequired: boolean;
   mood: string[];
   summary: string;
+  simplicityLevel?: StyleIntensity;
+  jazzLevel?: StyleIntensity;
 };
 
 export const DEFAULT_INTERPRETED_STYLE: InterpretedStyle = {

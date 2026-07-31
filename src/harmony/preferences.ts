@@ -1,4 +1,8 @@
-import type { HarmonyPreferences, StyleOption } from "../music/types";
+import type {
+  HarmonyPreferences,
+  StyleIntensity,
+  StyleOption,
+} from "../music/types";
 
 export const DEFAULT_HARMONY_SUMMARY =
   "Use a clear, consonant progression with a strong resolution.";
@@ -15,6 +19,8 @@ export const DEFAULT_HARMONY_PROFILE: HarmonyPreferences = {
   preferSuspensions: false,
   voiceLeadingPriority: 0.75,
   playabilityRequired: true,
+  simplicityLevel: 1,
+  jazzLevel: 0,
 };
 
 export type HarmonyPreferencePatch = {
@@ -65,16 +71,45 @@ export function resolveCreativeRevisionPreferences(
   active: HarmonyPreferences,
   interpreted: HarmonyPreferences,
   patch: HarmonyPreferencePatch = {},
+  relativeStyleChange?: "simpler" | "jazzier",
 ): HarmonyPreferences {
   const styleChanged = interpreted.style !== active.style;
 
-  if (styleChanged) {
-    return resolveHarmonyPreferences(interpreted, {
-      patch,
-    });
+  const resolved = styleChanged
+    ? resolveHarmonyPreferences(interpreted, {
+        patch,
+      })
+    : resolveHarmonyPreferences(active, {
+        patch,
+      });
+
+  if (relativeStyleChange === "simpler") {
+    const current =
+      active.simplicityLevel ?? (active.style === "simple" ? 1 : 0);
+    return {
+      ...resolved,
+      style: "simple",
+      simplicityLevel: Math.min(3, current + 1) as StyleIntensity,
+      jazzLevel: 0,
+      styleTransform: "simple",
+    };
+  }
+  if (relativeStyleChange === "jazzier") {
+    const current = active.jazzLevel ?? (active.style === "jazzy" ? 1 : 0);
+    return {
+      ...resolved,
+      style: "jazzy",
+      simplicityLevel: 0,
+      jazzLevel: Math.min(3, current + 1) as StyleIntensity,
+      styleTransform: "jazzy",
+    };
   }
 
-  return resolveHarmonyPreferences(active, {
-    patch,
-  });
+  return {
+    ...resolved,
+    simplicityLevel:
+      resolved.simplicityLevel ?? (resolved.style === "simple" ? 1 : 0),
+    jazzLevel: resolved.jazzLevel ?? (resolved.style === "jazzy" ? 1 : 0),
+    styleTransform: styleChanged ? resolved.style : undefined,
+  };
 }

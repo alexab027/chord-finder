@@ -6,3 +6,9 @@ export function asksForExplicitDescendingBass(prompt: string) {
     prompt,
   );
 }
+
+export function getRelativeStyleChange(prompt: string) {
+  if (/\bsimpler\b/i.test(prompt)) return "simpler" as const;
+  if (/\bjazzier\b/i.test(prompt)) return "jazzier" as const;
+  return undefined;
+}

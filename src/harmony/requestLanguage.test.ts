@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { asksForExplicitDescendingBass } from "./requestLanguage";
+import {
+  asksForExplicitDescendingBass,
+  getRelativeStyleChange,
+} from "./requestLanguage";
 
 describe("asksForExplicitDescendingBass", () => {
   it("recognizes a positive request", () => {
@@ -15,5 +18,13 @@ describe("asksForExplicitDescendingBass", () => {
     "make it jazzy without a descending bass",
   ])("does not turn a negated request into a positive preference: %s", (text) => {
     expect(asksForExplicitDescendingBass(text)).toBe(false);
+  });
+});
+
+describe("getRelativeStyleChange", () => {
+  it("recognizes only comparative style movement", () => {
+    expect(getRelativeStyleChange("make it simpler")).toBe("simpler");
+    expect(getRelativeStyleChange("make this jazzier")).toBe("jazzier");
+    expect(getRelativeStyleChange("make it simple")).toBeUndefined();
   });
 });

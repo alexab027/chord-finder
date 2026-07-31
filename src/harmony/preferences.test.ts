@@ -38,6 +38,7 @@ describe("default harmony profile", () => {
       ...interpreted,
       complexity: 0,
       dissonanceTolerance: 0,
+      styleTransform: "simple",
     });
   });
   it("applies a relative patch when the style is unchanged", () => {
@@ -170,5 +171,49 @@ describe("default harmony profile", () => {
     expect(applyHarmonyPreferencePatch(activePreferences, {})).toEqual(
       activePreferences,
     );
+  });
+
+  it("advances repeated simpler requests through discrete levels after complexity clamps", () => {
+    const active = {
+      ...DEFAULT_HARMONY_PROFILE,
+      complexity: 0,
+      simplicityLevel: 1 as const,
+    };
+    const first = resolveCreativeRevisionPreferences(
+      active,
+      active,
+      { complexityDelta: -1 },
+      "simpler",
+    );
+    const second = resolveCreativeRevisionPreferences(
+      first,
+      first,
+      { complexityDelta: -1 },
+      "simpler",
+    );
+
+    expect(first.complexity).toBe(0);
+    expect(first.simplicityLevel).toBe(2);
+    expect(second.complexity).toBe(0);
+    expect(second.simplicityLevel).toBe(3);
+  });
+
+  it("advances repeated jazzier requests independently", () => {
+    const active = {
+      ...DEFAULT_HARMONY_PROFILE,
+      style: "jazzy" as const,
+      simplicityLevel: 0 as const,
+      jazzLevel: 1 as const,
+    };
+    const next = resolveCreativeRevisionPreferences(
+      active,
+      active,
+      {},
+      "jazzier",
+    );
+
+    expect(next.style).toBe("jazzy");
+    expect(next.jazzLevel).toBe(2);
+    expect(next.simplicityLevel).toBe(0);
   });
 });

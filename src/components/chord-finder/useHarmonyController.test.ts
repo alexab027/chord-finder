@@ -4,6 +4,7 @@ import { toGenerationPreferences } from "../../ai/toGenerationPreferences";
 import { buildCandidatePool } from "../../harmony/candidates/buildCandidatePool";
 import { candidateHash } from "../../harmony/candidates/candidateHash";
 import type { CandidateSet } from "../../harmony/candidates/types";
+import { progressionComplexity } from "../../harmony/transforms/styleTransforms";
 import { buildNamedChord } from "../../music/chords";
 import { rankProgressions } from "../../music/chordGeneration";
 import type {
@@ -167,6 +168,34 @@ describe("prepareVisibleCandidates", () => {
       "triad",
       "triad",
     ]);
+  });
+
+  it("selects roles only from candidates satisfying the discrete style transform", () => {
+    const base = outsideGrammarBase();
+    const preferences = {
+      ...toGenerationPreferences(DEFAULT_INTERPRETED_STYLE),
+      style: "simple" as const,
+      simplicityLevel: 2 as const,
+      styleTransform: "simple" as const,
+    };
+    const candidates = prepareVisibleCandidates({
+      mode: "revise_existing",
+      key: aMinor,
+      measures: emptyMeasures,
+      getRenderedPitchFn: noPitch,
+      style: "simple",
+      preferences,
+      revision: revisionContext(base),
+      currentProgression: base,
+      voiceProgressionFn: visibleVoicing,
+    });
+
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(
+      candidates.every(
+        ({ progression }) => progressionComplexity(progression) <= 4,
+      ),
+    ).toBe(true);
   });
 
   it("applies every combined exact edit to every visible creative candidate", () => {

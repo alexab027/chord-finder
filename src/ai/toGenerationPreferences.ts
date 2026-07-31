@@ -16,5 +16,11 @@ export function toGenerationPreferences(
     preferSuspensions: interpretation.preferSuspensions,
     voiceLeadingPriority: interpretation.voiceLeadingPriority,
     playabilityRequired: interpretation.playabilityRequired,
+    simplicityLevel:
+      interpretation.simplicityLevel ??
+      (interpretation.primaryStyle === "simple" ? 1 : 0),
+    jazzLevel:
+      interpretation.jazzLevel ??
+      (interpretation.primaryStyle === "jazzy" ? 1 : 0),
   };
 }

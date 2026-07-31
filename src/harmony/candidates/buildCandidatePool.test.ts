@@ -9,6 +9,8 @@ import type {
 import { buildCandidatePool } from "./buildCandidatePool";
 import { candidateHash } from "./candidateHash";
 import { validateCandidate } from "./validateCandidate";
+import { DEFAULT_HARMONY_PROFILE } from "../preferences";
+import { progressionComplexity } from "../transforms/styleTransforms";
 
 const cMajor: KeyContext = {
   signature: "C",
@@ -151,5 +153,32 @@ describe("buildCandidatePool", () => {
     });
 
     expect(pool.every(({ source }) => source === "ranked_engine")).toBe(true);
+  });
+
+  it("connects the requested discrete simplicity target to the real pool", () => {
+    const base = revisionBase();
+    const pool = buildCandidatePool({
+      mode: "revise_existing",
+      key: aMinor,
+      measures: emptyMeasures,
+      getRenderedPitchFn: noPitch,
+      style: "simple",
+      preferences: {
+        ...DEFAULT_HARMONY_PROFILE,
+        simplicityLevel: 2,
+        styleTransform: "simple",
+      },
+      baseProgression: base,
+    });
+
+    expect(pool.length).toBeGreaterThan(0);
+    expect(pool.some(({ source }) => source === "style_transform")).toBe(true);
+    expect(
+      pool.every(
+        ({ progression }) =>
+          progressionComplexity(progression) <=
+          progressionComplexity(base) - 4,
+      ),
+    ).toBe(true);
   });
 });

@@ -21,7 +21,10 @@ import {
   directEditRequest,
   normalizeHarmonyRequest,
 } from "../harmony/request";
-import { asksForExplicitDescendingBass } from "../harmony/requestLanguage";
+import {
+  asksForExplicitDescendingBass,
+  getRelativeStyleChange,
+} from "../harmony/requestLanguage";
 import {
   resolveCreativeRevisionPreferences,
 } from "../harmony/preferences";
@@ -375,6 +378,7 @@ export default function Staff() {
       activePreferences,
       interpretedPreferences,
       revisionIntent.requestedChanges,
+      getRelativeStyleChange(normalizedPrompt),
     );
 
     const effectivePreferences: GenerationPreferences = {
@@ -411,6 +415,8 @@ export default function Staff() {
       consonancePriority: effectivePreferences.consonancePriority,
       voiceLeadingPriority: effectivePreferences.voiceLeadingPriority,
       playabilityRequired: effectivePreferences.playabilityRequired,
+      simplicityLevel: effectivePreferences.simplicityLevel,
+      jazzLevel: effectivePreferences.jazzLevel,
       summary: data.summary || baseInterpretation.summary,
     };
     openCreativeCandidatePreview({

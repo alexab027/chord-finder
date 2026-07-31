@@ -44,6 +44,7 @@ export type MelodyFitOptions = {
   consonancePriority?: number;
   dissonanceTolerance?: number;
   isFinalMeasure?: boolean;
+  simpleAccompaniment?: boolean;
 };
 
 export type MelodyEvent = {
@@ -165,8 +166,13 @@ export function scoreMelodyNoteAgainstChord(
   const toleranceMultiplier = 1 - 0.65 * dissonanceTolerance;
   const reasons: string[] = [];
   let points = 0;
+  const supportPcs =
+    options.simpleAccompaniment &&
+    isSeventhOrExtendedQuality(candidate.quality)
+      ? candidate.pcs.slice(0, 3)
+      : candidate.pcs;
 
-  if (candidate.pcs.includes(event.pc)) {
+  if (supportPcs.includes(event.pc)) {
     points += 2.4 * event.importance * melodyFitPriority;
     if (event.importance >= 4) {
       reasons.push(`Supports important melody note ${event.label}`);
@@ -175,7 +181,7 @@ export function scoreMelodyNoteAgainstChord(
   }
 
   const strongestPenalty = Math.max(
-    ...candidate.pcs.map((pc) => getIntervalDissonancePenalty(event.pc, pc)),
+    ...supportPcs.map((pc) => getIntervalDissonancePenalty(event.pc, pc)),
   );
   const resolvesByStep = isStepwiseResolution(event, melodyEvents);
   const scaleCompatible = getScalePcs(key).includes(event.pc);
@@ -231,7 +237,11 @@ export function scoreMelodyFit(
     scoreMelodyNoteAgainstChord(event, melodyEvents, candidate, key, options),
   );
   const matchingNotes = melodyEvents.filter(({ pc }) =>
-    candidate.pcs.includes(pc),
+    (options.simpleAccompaniment &&
+    isSeventhOrExtendedQuality(candidate.quality)
+      ? candidate.pcs.slice(0, 3)
+      : candidate.pcs
+    ).includes(pc),
   );
   const importantMatch = matchingNotes.some((event) => event.importance >= 4);
 
@@ -510,9 +520,11 @@ export function scoreChord(
         consonancePriority: context.preferences.consonancePriority,
         dissonanceTolerance: context.preferences.dissonanceTolerance,
         isFinalMeasure: context.measureIndex === context.measureCount - 1,
+        simpleAccompaniment: context.style === "simple",
       }
     : {
         isFinalMeasure: context.measureIndex === context.measureCount - 1,
+        simpleAccompaniment: context.style === "simple",
       };
 
   const scoreParts: ScoreResult[] = [
