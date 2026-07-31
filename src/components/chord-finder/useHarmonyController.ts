@@ -1,6 +1,9 @@
 import { useRef, useState } from "react";
 import type { InterpretedStyle } from "../../ai/types";
+import { applyChordEditTransaction } from "../../harmony/actionTransaction";
+import type { ChordEditAction } from "../../harmony/actions";
 import { buildCandidatePool } from "../../harmony/candidates/buildCandidatePool";
+import { candidateHash } from "../../harmony/candidates/candidateHash";
 import { selectCandidateRoles } from "../../harmony/candidates/selectCandidateRoles";
 import type {
   CandidateMode,
@@ -30,6 +33,7 @@ export type PrepareVisibleCandidatesInput = {
   preferences: GenerationPreferences;
   revision?: RevisionContext;
   currentProgression: readonly ScoredChord[] | null;
+  exactActions?: readonly ChordEditAction[];
   voiceProgressionFn?: VoiceProgressionFn;
 };
 
@@ -42,6 +46,7 @@ export function prepareVisibleCandidates({
   preferences,
   revision,
   currentProgression,
+  exactActions = [],
   voiceProgressionFn = voiceProgression,
 }: PrepareVisibleCandidatesInput): ProgressionCandidate[] {
   const pool = buildCandidatePool({
@@ -55,18 +60,33 @@ export function prepareVisibleCandidates({
     baseProgression:
       mode === "revise_existing" ? currentProgression : undefined,
   });
+  const constrainedPool = validateCandidatePool(
+    pool.map((candidate) => {
+      const progression =
+        exactActions.length > 0
+          ? applyChordEditTransaction(candidate.progression, exactActions, {
+              key,
+            })
+          : candidate.progression;
+      return {
+        ...candidate,
+        progression,
+        symbolicHash: candidateHash(progression),
+      };
+    }),
+  ).candidates;
   const selected =
     mode === "generate_new"
       ? selectCandidateRoles({
           mode,
-          candidates: pool,
+          candidates: constrainedPool,
           currentProgression,
           excludeCurrentProgression: Boolean(currentProgression),
         })
       : currentProgression
         ? selectCandidateRoles({
             mode,
-            candidates: pool,
+            candidates: constrainedPool,
             baseProgression: currentProgression,
           })
         : [];
@@ -165,17 +185,29 @@ export function useHarmonyController({
     revision,
     resultInterpretation,
     commitLabel,
+    exactActions,
   }: OpenCreativePreviewInput) {
-    const candidates = prepareVisibleCandidates({
-      mode,
-      key,
-      measures,
-      getRenderedPitchFn,
-      style,
-      preferences,
-      revision,
-      currentProgression: lastProgressionRef.current,
-    });
+    let candidates: ProgressionCandidate[];
+    try {
+      candidates = prepareVisibleCandidates({
+        mode,
+        key,
+        measures,
+        getRenderedPitchFn,
+        style,
+        preferences,
+        revision,
+        exactActions,
+        currentProgression: lastProgressionRef.current,
+      });
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Could not apply every requested chord edit.",
+      );
+      return null;
+    }
     if (candidates.length === 0) {
       setError("Could not prepare any valid progression previews.");
       return null;

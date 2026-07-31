@@ -14,7 +14,7 @@ export type HarmonyIntent =
 export type PendingClarification = {
   originalMessage: string;
   question: string;
-  possibleIntents?: string[];
+  possibleIntents?: HarmonyIntent[];
 };
 
 export type InterpretedStyle = {

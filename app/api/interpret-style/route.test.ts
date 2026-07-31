@@ -117,6 +117,21 @@ describe("current progression sanitization", () => {
       },
     ]);
   });
+
+  it("keeps only unique integer measure identities in sorted staff order", () => {
+    expect(
+      sanitizeCurrentProgression([
+        { measure: 3, absoluteSymbol: "G", romanNumeral: "V" },
+        { measure: 1.5, absoluteSymbol: "C", romanNumeral: "I" },
+        { measure: 1, absoluteSymbol: "C", romanNumeral: "I" },
+        { measure: 3, absoluteSymbol: "G7", romanNumeral: "V7" },
+        { measure: 9, absoluteSymbol: "F", romanNumeral: "IV" },
+      ]),
+    ).toEqual([
+      { measure: 1, absoluteSymbol: "C", romanNumeral: "I" },
+      { measure: 3, absoluteSymbol: "G7", romanNumeral: "V7" },
+    ]);
+  });
 });
 
 describe("strict Groq router contract", () => {
@@ -207,6 +222,33 @@ describe("strict Groq router contract", () => {
     });
     expect(result.clarificationQuestion).toBeUndefined();
     expect(result.assistantMessage).toBeUndefined();
+  });
+
+  it("validates preserved positions against accepted measure identities", async () => {
+    const result = await interpretWithGroq(
+      "keep the available measures",
+      {
+        ...baseGroqOutput,
+        intent: "revise_existing",
+        revision: {
+          preserveOverallProgression: true,
+          preserveChordPositions: [1, 2, 3],
+          changeAmount: 0.3,
+          requestedChanges: {
+            complexityDelta: null,
+            dissonanceDelta: null,
+            descendingBassDelta: null,
+            cadenceDelta: null,
+          },
+        },
+      },
+      {
+        hasProgression: true,
+        currentProgression: [currentProgression[0], currentProgression[2]],
+      },
+    );
+
+    expect(result.revision.preserveChordPositions).toEqual([1, 3]);
   });
 
   it("returns clarification text and omits unrelated strict fields", async () => {
@@ -369,6 +411,36 @@ describe("strict Groq router contract", () => {
     expect(result.actions).toEqual([]);
     expect(result.clarificationQuestion).toMatch(/unsupported action/i);
   });
+
+  it("rejects conflicting model actions as one transaction", async () => {
+    const result = await interpretWithGroq(
+      "change chord 2 twice",
+      {
+        ...baseGroqOutput,
+        intent: "revise_existing",
+        revision: {
+          preserveOverallProgression: true,
+          preserveChordPositions: [],
+          changeAmount: 0.3,
+          requestedChanges: {
+            complexityDelta: null,
+            dissonanceDelta: null,
+            descendingBassDelta: null,
+            cadenceDelta: null,
+          },
+        },
+        actions: [
+          { type: "replace_chord", measure: 2, chordName: "F" },
+          { type: "replace_chord", measure: 2, chordName: "Am" },
+        ],
+      },
+      { hasProgression: true, currentProgression },
+    );
+
+    expect(result.intent).toBe("clarify");
+    expect(result.actions).toEqual([]);
+    expect(result.clarificationQuestion).toMatch(/conflicting/i);
+  });
 });
 
 describe("explicit named-chord edits", () => {
@@ -400,7 +472,8 @@ describe("explicit named-chord edits", () => {
   it("does not treat add color as a named-chord edit", async () => {
     const result = await interpret("add color");
 
-    expect(result.actions).toBeUndefined();
+    expect(result.actions).toEqual([]);
+    expect(result.intent).toBe("clarify");
     expect(result.warning).toMatch(/not configured/i);
   });
 

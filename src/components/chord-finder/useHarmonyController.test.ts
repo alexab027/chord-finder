@@ -164,4 +164,31 @@ describe("prepareVisibleCandidates", () => {
       "triad",
     ]);
   });
+
+  it("applies every combined exact edit to every visible creative candidate", () => {
+    const preferences = toGenerationPreferences(DEFAULT_INTERPRETED_STYLE);
+    const candidates = prepareVisibleCandidates({
+      mode: "generate_new",
+      key: cMajor,
+      measures: emptyMeasures,
+      getRenderedPitchFn: noPitch,
+      style: preferences.style,
+      preferences,
+      currentProgression: null,
+      exactActions: [
+        { type: "replace_chord", measure: 2, chordName: "F" },
+        { type: "replace_chord", measure: 4, chordName: "Am" },
+      ],
+      voiceProgressionFn: visibleVoicing,
+    });
+
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(
+      candidates.every(
+        ({ progression }) =>
+          progression[1].chord.absoluteSymbol === "F" &&
+          progression[3].chord.absoluteSymbol === "Am",
+      ),
+    ).toBe(true);
+  });
 });

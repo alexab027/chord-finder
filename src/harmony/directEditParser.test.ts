@@ -73,6 +73,18 @@ describe("parsePureDirectEdits — accepts pure exact edits", () => {
       expected,
     );
   });
+
+  it("parses multiple exact edits only when every clause is supported", () => {
+    expect(
+      parsePureDirectEdits(
+        "change measure 2 to F and change measure 4 to Am",
+        N,
+      ),
+    ).toEqual([
+      { type: "replace_chord", measure: 2, chordName: "F" },
+      { type: "replace_chord", measure: 4, chordName: "Am" },
+    ]);
+  });
 });
 
 describe("parsePureDirectEdits — defers to Groq (returns null)", () => {
@@ -88,6 +100,15 @@ describe("parsePureDirectEdits — defers to Groq (returns null)", () => {
     ).toBeNull();
     expect(
       parsePureDirectEdits("change measure 2 to C and make it jazzier", N),
+    ).toBeNull();
+  });
+
+  it("rejects a multi-edit when any clause is malformed", () => {
+    expect(
+      parsePureDirectEdits(
+        "change measure 2 to F and change measure 4 to H",
+        N,
+      ),
     ).toBeNull();
   });
 

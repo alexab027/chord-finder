@@ -12,13 +12,17 @@ import {
 import { voiceProgression } from "../music/voicing";
 import {
   applyChordEdit,
-  applyChordEdits,
   HarmonyActionError,
   type ChordEditAction,
 } from "../harmony/actions";
+import { applyChordEditTransaction } from "../harmony/actionTransaction";
 import { parsePureDirectEdits } from "../harmony/directEditParser";
 import {
-  resolveHarmonyPreferences,
+  directEditRequest,
+  normalizeHarmonyRequest,
+} from "../harmony/request";
+import { asksForExplicitDescendingBass } from "../harmony/requestLanguage";
+import {
   resolveCreativeRevisionPreferences,
 } from "../harmony/preferences";
 import { useHarmonyMessages } from "./chord-finder/useHarmonyMessages";
@@ -75,10 +79,6 @@ const FRESH_PLACEHOLDER =
 const REVISION_PLACEHOLDER =
   "Example: Keep this progression but make it slightly more complex";
 
-function asksForExplicitDescendingBass(prompt: string) {
-  return /\bdescending\s+bass(?:\s*line|line)?\b/i.test(prompt);
-}
-
 export default function Staff() {
   const staffWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -112,7 +112,6 @@ export default function Staff() {
     candidateSet,
     chordMeasures,
     lastProgressionRef,
-    setAiInterpretation,
     commitProgressionState,
     openCreativeCandidatePreview,
     handlePreviewCandidate,
@@ -295,7 +294,7 @@ export default function Staff() {
     if (requestedActions.length === 0) return baseProgression;
 
     try {
-      return applyChordEdits(baseProgression, requestedActions, {
+      return applyChordEditTransaction(baseProgression, requestedActions, {
         key: generatedKey,
       });
     } catch (editError) {
@@ -318,15 +317,6 @@ export default function Staff() {
     );
     const requestedActions = data?.actions ?? [];
 
-    // Combined creative-plus-exact transactions are completed in Milestone 6.
-    // Until then, do not silently apply only the creative part of the request.
-    if (requestedActions.length > 0) {
-      setAiError(
-        "Creative requests with exact chord edits need clarification before anything can change.",
-      );
-      return;
-    }
-
     const resultInterpretation: InterpretedStyle =
       data ?? DEFAULT_INTERPRETED_STYLE;
 
@@ -344,6 +334,7 @@ export default function Staff() {
       style: effectiveStyle,
       preferences,
       resultInterpretation,
+      exactActions: requestedActions,
       mode: "generate_new",
       commitLabel: "Generated",
     });
@@ -369,52 +360,6 @@ export default function Staff() {
       getRenderedPitch,
     );
     const requestedActions = data.actions ?? [];
-
-    if (requestedActions.length > 0) {
-      const baseInterpretationForActions =
-        aiInterpretation ?? DEFAULT_INTERPRETED_STYLE;
-      const activePreferences = toGenerationPreferences(
-        baseInterpretationForActions,
-      );
-      const effectivePreferences = resolveHarmonyPreferences(
-        activePreferences,
-        {
-          patch: data.revision?.requestedChanges,
-        },
-      );
-
-      const effectiveStyle = effectivePreferences.style;
-      const appliedInterpretation: InterpretedStyle = {
-        ...baseInterpretationForActions,
-        primaryStyle: effectiveStyle,
-        descendingBassWeight: effectivePreferences.descendingBassWeight,
-        complexity: effectivePreferences.complexity,
-        dissonanceTolerance: effectivePreferences.dissonanceTolerance,
-        cadenceStrength: effectivePreferences.cadenceStrength,
-        preferSevenths: effectivePreferences.preferSevenths,
-        preferSuspensions: effectivePreferences.preferSuspensions,
-        melodyFitPriority: effectivePreferences.melodyFitPriority,
-        consonancePriority: effectivePreferences.consonancePriority,
-        voiceLeadingPriority: effectivePreferences.voiceLeadingPriority,
-        playabilityRequired: effectivePreferences.playabilityRequired,
-      };
-      setAiInterpretation(appliedInterpretation);
-
-      const finalProgression = applyRequestedActions(
-        previousProgression,
-        requestedActions,
-        generatedKey,
-      );
-
-      renderProgression(
-        finalProgression,
-        generatedKey.label,
-        "Updated",
-        effectivePreferences,
-      );
-      setPendingClarification(null);
-      return;
-    }
 
     const baseInterpretation = aiInterpretation ?? DEFAULT_INTERPRETED_STYLE;
     const revisionIntent: RevisionIntent = data.revision ?? {
@@ -476,6 +421,7 @@ export default function Staff() {
       preferences: effectivePreferences,
       revision,
       resultInterpretation: appliedInterpretation,
+      exactActions: requestedActions,
       mode: "revise_existing",
       commitLabel: "Updated",
     });
@@ -527,14 +473,7 @@ export default function Staff() {
     setPendingClarification(null);
   }
 
-  function handleClarification(
-    data: HarmonyRouterResponse,
-    originalMessage: string,
-  ) {
-    const question =
-      data.clarificationQuestion ??
-      "Could you clarify whether you want a new progression or a change to the current one?";
-
+  function handleClarification(question: string, originalMessage: string) {
     setPendingClarification({
       originalMessage,
       question,
@@ -619,9 +558,23 @@ export default function Staff() {
           previousProgression.length,
         );
         if (directEdits) {
+          let request;
+          try {
+            request = directEditRequest(
+              directEdits,
+              previousProgression.length,
+            );
+          } catch (error) {
+            setAiError(
+              error instanceof Error
+                ? error.message
+                : "The exact edits conflict, so nothing was changed.",
+            );
+            return;
+          }
           handleDirectEditShortcut(
             normalizedPrompt,
-            directEdits,
+            request.intent === "direct_edit" ? request.actions : [],
             previousProgression,
           );
           return;
@@ -647,27 +600,48 @@ export default function Staff() {
       if (!data || data.warning) {
         setAiError(
           data?.warning ??
-            "AI interpretation was unavailable. A default progression was generated instead.",
+            "AI interpretation was unavailable. Nothing was changed.",
         );
-        if (previousProgression && previousProgression.length > 0) {
-          return;
-        }
-        handleGenerateNewProgression(normalizedPrompt);
         return;
       }
 
-      switch (data.intent) {
+      const request = normalizeHarmonyRequest({
+        response: data,
+        measureCount: previousProgression?.length ?? 4,
+        prompt: normalizedPrompt,
+      });
+
+      switch (request.intent) {
+        case "direct_edit":
+          if (!previousProgression || previousProgression.length === 0) {
+            pushAssistantMessage(
+              "There is no existing progression to edit. Generate one first.",
+            );
+            break;
+          }
+          handleDirectEditShortcut(
+            normalizedPrompt,
+            request.actions,
+            previousProgression,
+          );
+          break;
         case "generate_new":
-          handleGenerateNewProgression(normalizedPrompt, data);
+          handleGenerateNewProgression(
+            normalizedPrompt,
+            request.interpretation,
+          );
           break;
         case "revise_existing":
-          handleReviseExistingProgression(normalizedPrompt, data);
+          handleReviseExistingProgression(
+            normalizedPrompt,
+            request.interpretation,
+          );
           break;
         case "clarify":
-          handleClarification(data, normalizedPrompt);
+          handleClarification(request.question, normalizedPrompt);
           break;
         case "answer_question":
-          handleAnswerQuestion(data, normalizedPrompt);
+          handleAnswerQuestion(request.interpretation, normalizedPrompt);
           break;
       }
     } catch (error) {

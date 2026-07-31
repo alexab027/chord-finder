@@ -19,6 +19,8 @@ import type {
   HarmonyChordQuality,
 } from "@/src/harmony/actions";
 import { CHORD_SYMBOL } from "@/src/harmony/chordSymbol";
+import { validateChordEditTransaction } from "@/src/harmony/actionTransaction";
+import { asksForExplicitDescendingBass } from "@/src/harmony/requestLanguage";
 
 const MAX_PROMPT_LENGTH = 500;
 const MAX_KEY_LENGTH = 40;
@@ -190,7 +192,7 @@ export function sanitizeCurrentProgression(
   value: unknown,
 ): CurrentProgressionItem[] {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, MAX_PROGRESSION_MEASURES).flatMap((raw) => {
+  const sanitized = value.flatMap((raw) => {
     const item = (raw ?? {}) as Record<string, unknown>;
     const measure = item.measure;
     const romanNumeral =
@@ -203,7 +205,9 @@ export function sanitizeCurrentProgression(
         : romanNumeral;
     if (
       typeof measure !== "number" ||
-      !Number.isFinite(measure) ||
+      !Number.isInteger(measure) ||
+      measure < 1 ||
+      measure > MAX_PROGRESSION_MEASURES ||
       !romanNumeral ||
       !absoluteSymbol
     ) {
@@ -211,6 +215,11 @@ export function sanitizeCurrentProgression(
     }
     return [{ measure, absoluteSymbol, romanNumeral }];
   });
+  return Array.from(
+    new Map(sanitized.map((item) => [item.measure, item])).values(),
+  )
+    .sort((left, right) => left.measure - right.measure)
+    .slice(0, MAX_PROGRESSION_MEASURES);
 }
 
 function sanitizePendingClarification(
@@ -227,11 +236,19 @@ function sanitizePendingClarification(
       : "";
   if (!originalMessage || !question) return null;
 
+  const allowedIntents: HarmonyIntent[] = [
+    "generate_new",
+    "revise_existing",
+    "clarify",
+    "answer_question",
+  ];
   const possibleIntents = Array.isArray(data.possibleIntents)
     ? data.possibleIntents
-        .filter((item): item is string => typeof item === "string")
-        .map((item) => item.trim().slice(0, 40))
-        .filter(Boolean)
+        .filter(
+          (item): item is HarmonyIntent =>
+            typeof item === "string" &&
+            allowedIntents.includes(item as HarmonyIntent),
+        )
         .slice(0, 4)
     : undefined;
 
@@ -271,10 +288,6 @@ function asksForModeChange(prompt: string) {
   return /\b(make|turn|change|convert|set)\b.*\b(major|minor)\s+progression\b/i.test(
     prompt,
   );
-}
-
-function asksForExplicitDescendingBass(prompt: string) {
-  return /\bdescending\s+bass(?:\s*line|line)?\b/i.test(prompt);
 }
 
 function unsupportedActionTypes(value: unknown): string[] {
@@ -474,13 +487,18 @@ function mergeExplicitCopyActions(
 ) {
   if (explicitCopyActions.length === 0) return actions;
 
-  return [
-    ...actions.filter((action) => action.type !== "copy_chord"),
-    ...explicitCopyActions,
-  ];
+  return [...actions, ...explicitCopyActions].filter(
+    (action, index, merged) =>
+      merged.findIndex(
+        (candidate) => JSON.stringify(candidate) === JSON.stringify(action),
+      ) === index,
+  );
 }
 
-function sanitizeRevision(raw: unknown, measureCount: number): RevisionIntent {
+function sanitizeRevision(
+  raw: unknown,
+  acceptedMeasures: readonly number[],
+): RevisionIntent {
   const data = (raw ?? {}) as Record<string, unknown>;
 
   const preserveChordPositions = Array.isArray(data.preserveChordPositions)
@@ -490,8 +508,7 @@ function sanitizeRevision(raw: unknown, measureCount: number): RevisionIntent {
             (n): n is number =>
               typeof n === "number" &&
               Number.isInteger(n) &&
-              n >= 1 &&
-              n <= measureCount,
+              acceptedMeasures.includes(n),
           ),
         ),
       )
@@ -779,12 +796,17 @@ export async function POST(request: Request): Promise<Response> {
       body?.pendingClarification,
     );
   } catch {
-    // Malformed JSON body: fall back to safe defaults rather than throwing.
-    return json({
-      ...DEFAULT_INTERPRETED_STYLE,
-      intent: "generate_new",
-      confidence: 1,
-    });
+    return json(
+      {
+        ...DEFAULT_INTERPRETED_STYLE,
+        intent: "clarify",
+        confidence: 0,
+        actions: [],
+        clarificationQuestion:
+          "I could not read the request body, so nothing was changed.",
+      },
+      400,
+    );
   }
 
   // Empty prompt: deterministic defaults, no Groq call.
@@ -796,14 +818,15 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
-  // Reject overly long prompts, but keep a usable response shape.
+  // Reject overly long prompts without turning them into generation requests.
   if (prompt.length > MAX_PROMPT_LENGTH) {
     return json(
       {
         ...DEFAULT_INTERPRETED_STYLE,
-        intent: "generate_new",
-        confidence: 1,
-        warning: `Prompt exceeds ${MAX_PROMPT_LENGTH} characters; using default style.`,
+        intent: "clarify",
+        confidence: 0,
+        actions: [],
+        clarificationQuestion: `Please shorten the request to ${MAX_PROMPT_LENGTH} characters or fewer. Nothing was changed.`,
       },
       400,
     );
@@ -890,9 +913,12 @@ export async function POST(request: Request): Promise<Response> {
     console.error("interpret-style: GROQ_API_KEY is not configured.");
     return json({
       ...DEFAULT_INTERPRETED_STYLE,
-      intent: "generate_new",
-      confidence: 1,
-      warning: "AI interpretation is not configured; using default style.",
+      intent: "clarify",
+      confidence: 0,
+      actions: [],
+      warning: "AI interpretation is not configured; nothing was changed.",
+      clarificationQuestion:
+        "AI interpretation is not configured. Try a supported exact edit or configure the service.",
     });
   }
 
@@ -940,9 +966,12 @@ export async function POST(request: Request): Promise<Response> {
     if (!content) {
       return json({
         ...DEFAULT_INTERPRETED_STYLE,
-        intent: "generate_new",
-        confidence: 1,
-        warning: "AI interpretation was empty; using default style.",
+        intent: "clarify",
+        confidence: 0,
+        actions: [],
+        warning: "AI interpretation was empty; nothing was changed.",
+        clarificationQuestion:
+          "I could not interpret the request. Please try rephrasing it.",
       });
     }
 
@@ -1002,6 +1031,23 @@ export async function POST(request: Request): Promise<Response> {
       extractExplicitCopyActions(prompt),
     );
 
+    try {
+      if (actions.length > 0) {
+        validateChordEditTransaction(actions, STAFF_MEASURE_COUNT);
+      }
+    } catch (error) {
+      return json({
+        ...interpretation,
+        intent: "clarify",
+        confidence,
+        actions: [],
+        clarificationQuestion:
+          error instanceof Error
+            ? error.message
+            : "The requested edits conflict, so nothing was changed.",
+      });
+    }
+
     const modelIntent = asIntent(parsed.intent);
     const intent = isExistingStyleRevision(prompt, hasExistingProgression)
       ? "revise_existing"
@@ -1019,7 +1065,10 @@ export async function POST(request: Request): Promise<Response> {
 
     const resolvedRevision =
       intent === "revise_existing"
-        ? sanitizeRevision(parsed.revision, currentProgression.length)
+        ? sanitizeRevision(
+            parsed.revision,
+            currentProgression.map(({ measure }) => measure),
+          )
         : undefined;
 
     if (intent === "revise_existing") {
@@ -1065,9 +1114,12 @@ export async function POST(request: Request): Promise<Response> {
     );
     return json({
       ...DEFAULT_INTERPRETED_STYLE,
-      intent: "generate_new",
-      confidence: 1,
-      warning: "AI interpretation was unavailable; using default style.",
+      intent: "clarify",
+      confidence: 0,
+      actions: [],
+      warning: "AI interpretation was unavailable; nothing was changed.",
+      clarificationQuestion:
+        "AI interpretation is unavailable. Please try again without changing the current progression.",
     });
   }
 }

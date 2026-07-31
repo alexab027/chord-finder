@@ -13,10 +13,8 @@ import { CHORD_SYMBOL } from "./chordSymbol";
 // you could have skipped); over-accepting is NOT (you would silently drop a
 // clause). So every check here is conservative — when in doubt, return null.
 //
-// Scope of this first pass (see implementation1.md):
-//  - one edit per prompt only (no "and"-joined multi-edits);
-//  - emits replace_chord / copy_chord actions, which the existing deterministic
-//    engine (harmony/actions.applyChordEdits) validates and applies.
+// Multiple edits are accepted only when every clause is a complete supported
+// edit. Creative or unparsed clauses cause the entire prompt to defer.
 
 // The shared chord-name vocabulary (see chordSymbol.ts). Aliased to CHORD so the
 // patterns below read the same.
@@ -165,9 +163,24 @@ export function parsePureDirectEdits(
   const trimmed = prompt.trim();
   if (trimmed.length === 0) return null;
 
-  return (
+  const single =
     parseSingleEdit(trimmed, measureCount) ??
     parseCopyEdit(trimmed, measureCount) ??
-    parseSetProgression(trimmed, measureCount)
+    parseSetProgression(trimmed, measureCount);
+  if (single) return single;
+
+  const clauses = trimmed
+    .replace(/[.!?]+$/, "")
+    .split(/\s*(?:;|\band\b)\s*/i)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+  if (clauses.length < 2) return null;
+
+  const parsed = clauses.map(
+    (clause) =>
+      parseSingleEdit(clause, measureCount) ??
+      parseCopyEdit(clause, measureCount),
   );
+  if (parsed.some((actions) => actions === null)) return null;
+  return parsed.flatMap((actions) => actions ?? []);
 }
