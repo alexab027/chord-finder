@@ -69,7 +69,9 @@ export function resolveCreativeRevisionPreferences(
   const styleChanged = interpreted.style !== active.style;
 
   if (styleChanged) {
-    return { ...interpreted };
+    return resolveHarmonyPreferences(interpreted, {
+      patch,
+    });
   }
 
   return resolveHarmonyPreferences(active, {

@@ -10,7 +10,7 @@ import {
 
 describe("default harmony profile", () => {
   //style-switching tests
-  it("replaces the jazzy profile when switching to simple", () => {
+  it("applies the revision patch when switching from jazzy to simple", () => {
     const active = {
       ...DEFAULT_HARMONY_PROFILE,
       style: "jazzy" as const,
@@ -23,17 +23,22 @@ describe("default harmony profile", () => {
     const interpreted = {
       ...DEFAULT_HARMONY_PROFILE,
       style: "simple" as const,
-      complexity: 0,
-      dissonanceTolerance: 0,
+      complexity: 0.4,
+      dissonanceTolerance: 0.3,
       preferSevenths: false,
       preferSuspensions: false,
     };
 
     const resolved = resolveCreativeRevisionPreferences(active, interpreted, {
       complexityDelta: -0.5,
+      dissonanceDelta: -0.3,
     });
 
-    expect(resolved).toEqual(interpreted);
+    expect(resolved).toEqual({
+      ...interpreted,
+      complexity: 0,
+      dissonanceTolerance: 0,
+    });
   });
   it("applies a relative patch when the style is unchanged", () => {
     const active = {
