@@ -166,8 +166,40 @@ describe("HarmonyChat candidate controls", () => {
       />,
     );
 
-    expect(markup).toContain("Selection committed.");
+    expect(markup).toContain(
+      "Selection committed. You can preview these options again.",
+    );
     expect(markup).not.toContain(">Select</button>");
     expect(markup).not.toContain(">Cancel</button>");
+    expect(markup).not.toContain(' disabled=""');
+  });
+
+  it("disables old options while a newer preview transaction is open", () => {
+    const markup = renderToStaticMarkup(
+      <HarmonyChat
+        candidatePreview={{
+          id: "candidate-set-2",
+          previewedCandidateId: "candidate-1",
+          status: "previewing",
+        }}
+        composerValue=""
+        error={null}
+        hasProgression
+        helperText="Helper"
+        isExplaining={false}
+        isGenerating={false}
+        messages={[candidateMessage]}
+        onCancelCandidate={noOp}
+        onComposerChange={noOp}
+        onPreviewCandidate={noOp}
+        onSelectCandidate={noOp}
+        onSubmit={noOp}
+        placeholder="Describe harmony"
+      />,
+    );
+
+    expect(
+      markup.match(/aria-pressed="false"[^>]* disabled=""/g),
+    ).toHaveLength(3);
   });
 });

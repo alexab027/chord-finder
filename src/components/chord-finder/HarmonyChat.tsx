@@ -184,6 +184,8 @@ function CandidateMessage({
 }) {
   const isCurrentSet = candidatePreview?.id === candidateSetId;
   const isPreviewing = isCurrentSet && candidatePreview.status === "previewing";
+  const anotherSetIsPreviewing =
+    candidatePreview?.status === "previewing" && !isCurrentSet;
 
   return (
     <article className="space-y-3 bg-[var(--surface)] px-4 py-4">
@@ -195,7 +197,9 @@ function CandidateMessage({
           Choose a progression
         </div>
         <p className="mt-1 text-xs text-[var(--text-muted)]">
-          Preview each option on the staff, then select one or cancel.
+          {isPreviewing
+            ? "Preview each option on the staff, then select one or cancel."
+            : "Choose an option to open a fresh preview from your current progression."}
         </p>
       </div>
 
@@ -213,7 +217,7 @@ function CandidateMessage({
                   ? "rounded-md border border-[var(--accent-border)] bg-[color-mix(in_srgb,var(--accent)_10%,white)] px-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
                   : "rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-3 text-left hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
               }
-              disabled={!isPreviewing}
+              disabled={anotherSetIsPreviewing}
               key={candidate.id}
               onClick={() =>
                 onPreviewCandidate(candidateSetId, candidate.id)
@@ -253,8 +257,8 @@ function CandidateMessage({
       ) : (
         <p className="text-xs font-medium text-[var(--text-muted)]">
           {isCurrentSet && candidatePreview.status === "selected"
-            ? "Selection committed."
-            : "Preview closed."}
+            ? "Selection committed. You can preview these options again."
+            : "Preview closed. You can preview these options again."}
         </p>
       )}
     </article>

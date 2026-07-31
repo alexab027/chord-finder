@@ -6,6 +6,8 @@ import { candidatePreviewReducer } from "./useCandidatePreview";
 function fixtureCandidateSet(): CandidateSet {
   return {
     id: "candidate-set-1",
+    sessionId: "session-1",
+    requestId: "request-1",
     mode: "generate_new",
     keyLabel: "C major",
     commitLabel: "Generated",

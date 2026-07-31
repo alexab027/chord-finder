@@ -1,4 +1,5 @@
 import { useReducer, useRef } from "react";
+import { candidateSetIdentity } from "../../harmony/candidates/candidateSetIdentity";
 import type { CandidateSet } from "../../harmony/candidates/types";
 
 export type OpenCandidateSet = Omit<
@@ -42,16 +43,18 @@ export function candidatePreviewReducer(
 
 export function useCandidatePreview() {
   const [candidateSet, dispatch] = useReducer(candidatePreviewReducer, null);
-  const candidateSetIdRef = useRef(0);
+  const openedSetIdsRef = useRef(new Set<string>());
 
   function openCandidatePreview(input: OpenCandidateSet) {
     const firstCandidate = input.candidates[0];
     if (!firstCandidate) return null;
 
-    candidateSetIdRef.current += 1;
+    const id = candidateSetIdentity(input);
+    if (openedSetIdsRef.current.has(id)) return null;
+    openedSetIdsRef.current.add(id);
     const nextCandidateSet: CandidateSet = {
       ...input,
-      id: `candidate-set-${candidateSetIdRef.current}`,
+      id,
       previewedCandidateId: firstCandidate.id,
       status: "previewing",
     };

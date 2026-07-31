@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { InterpretedStyle } from "../../ai/types";
 import { applyChordEditTransaction } from "../../harmony/actionTransaction";
 import type { ChordEditAction } from "../../harmony/actions";
@@ -7,9 +7,15 @@ import { candidateHash } from "../../harmony/candidates/candidateHash";
 import { selectCandidateRoles } from "../../harmony/candidates/selectCandidateRoles";
 import type {
   CandidateMode,
+  CandidateSet,
   ProgressionCandidate,
 } from "../../harmony/candidates/types";
 import { validateCandidatePool } from "../../harmony/candidates/validateCandidate";
+import {
+  EMPTY_HARMONY_HISTORY,
+  recordHarmonyCommit,
+  type HarmonyCommitSource,
+} from "../../harmony/history";
 import { voiceProgression } from "../../music/voicing";
 import type {
   GenerationPreferences,
@@ -20,9 +26,51 @@ import type {
   ScoredChord,
   StyleOption,
 } from "../../music/types";
-import { useCandidatePreview } from "./useCandidatePreview";
+import {
+  useCandidatePreview,
+  type OpenCandidateSet,
+} from "./useCandidatePreview";
 
 type VoiceProgressionFn = typeof voiceProgression;
+
+export function prepareReopenedCandidateSet({
+  archived,
+  candidateId,
+  sessionId,
+  requestId,
+  currentProgression,
+  currentVoicedProgression,
+  currentInterpretation,
+}: {
+  archived: CandidateSet;
+  candidateId: string;
+  sessionId: string;
+  requestId: string;
+  currentProgression: ScoredChord[] | null;
+  currentVoicedProgression: PlacedChord[][];
+  currentInterpretation: InterpretedStyle | null;
+}): OpenCandidateSet | null {
+  const candidate = archived.candidates.find((item) => item.id === candidateId);
+  if (!candidate) return null;
+
+  return {
+    sessionId,
+    requestId,
+    mode: archived.mode,
+    keyLabel: archived.keyLabel,
+    commitLabel: archived.commitLabel,
+    baseProgression: currentProgression,
+    baseVoicedProgression: currentVoicedProgression.map((measure) => [
+      ...measure,
+    ]),
+    baseInterpretation: currentInterpretation,
+    resultInterpretation: archived.resultInterpretation,
+    candidates: [
+      candidate,
+      ...archived.candidates.filter((item) => item.id !== candidateId),
+    ],
+  };
+}
 
 export type PrepareVisibleCandidatesInput = {
   mode: CandidateMode;
@@ -34,6 +82,7 @@ export type PrepareVisibleCandidatesInput = {
   revision?: RevisionContext;
   currentProgression: readonly ScoredChord[] | null;
   exactActions?: readonly ChordEditAction[];
+  seenHashes?: readonly string[];
   voiceProgressionFn?: VoiceProgressionFn;
 };
 
@@ -47,6 +96,7 @@ export function prepareVisibleCandidates({
   revision,
   currentProgression,
   exactActions = [],
+  seenHashes = [],
   voiceProgressionFn = voiceProgression,
 }: PrepareVisibleCandidatesInput): ProgressionCandidate[] {
   const pool = buildCandidatePool({
@@ -60,20 +110,26 @@ export function prepareVisibleCandidates({
     baseProgression:
       mode === "revise_existing" ? currentProgression : undefined,
   });
+  const seen = new Set(seenHashes);
   const constrainedPool = validateCandidatePool(
-    pool.map((candidate) => {
-      const progression =
-        exactActions.length > 0
-          ? applyChordEditTransaction(candidate.progression, exactActions, {
-              key,
-            })
-          : candidate.progression;
-      return {
-        ...candidate,
-        progression,
-        symbolicHash: candidateHash(progression),
-      };
-    }),
+    pool
+      .map((candidate) => {
+        const progression =
+          exactActions.length > 0
+            ? applyChordEditTransaction(candidate.progression, exactActions, {
+                key,
+              })
+            : candidate.progression;
+        return {
+          ...candidate,
+          progression,
+          symbolicHash: candidateHash(progression),
+        };
+      })
+      .filter(
+        ({ symbolicHash }) =>
+          mode !== "generate_new" || !seen.has(symbolicHash),
+      ),
   ).candidates;
   const selected =
     mode === "generate_new"
@@ -157,7 +213,12 @@ export function useHarmonyController({
     [],
     [],
   ]);
+  const [history, setHistory] = useState(EMPTY_HARMONY_HISTORY);
   const lastProgressionRef = useRef<ScoredChord[] | null>(null);
+  const sessionId = `harmony-session-${useId()}`;
+  const requestSequenceRef = useRef(0);
+  const candidateSetsRef = useRef(new Map<string, CandidateSet>());
+  const committedCandidateSetsRef = useRef(new Set<string>());
   const {
     candidateSet,
     openCandidatePreview,
@@ -167,12 +228,33 @@ export function useHarmonyController({
     clearCandidatePreview,
   } = useCandidatePreview();
 
+  function nextRequestId() {
+    requestSequenceRef.current += 1;
+    return `request-${requestSequenceRef.current}`;
+  }
+
   function commitProgressionState(
     progression: ScoredChord[],
     voicedProgression: PlacedChord[][],
+    metadata: {
+      requestId?: string;
+      interpretation?: InterpretedStyle | null;
+      source?: HarmonyCommitSource;
+    } = {},
   ) {
     lastProgressionRef.current = progression;
     setChordMeasures(voicedProgression);
+    const requestId = metadata.requestId ?? nextRequestId();
+    setHistory((current) =>
+      recordHarmonyCommit(current, {
+        sessionId,
+        requestId,
+        progression,
+        voicedProgression,
+        interpretation: metadata.interpretation ?? aiInterpretation,
+        source: metadata.source ?? "direct_edit",
+      }),
+    );
   }
 
   function openCreativeCandidatePreview({
@@ -198,6 +280,7 @@ export function useHarmonyController({
         preferences,
         revision,
         exactActions,
+        seenHashes: history.seenHashes,
         currentProgression: lastProgressionRef.current,
       });
     } catch (error) {
@@ -214,6 +297,8 @@ export function useHarmonyController({
     }
 
     const nextCandidateSet = openCandidatePreview({
+      sessionId,
+      requestId: nextRequestId(),
       mode,
       keyLabel: key.label,
       commitLabel,
@@ -226,6 +311,7 @@ export function useHarmonyController({
     const firstCandidate = nextCandidateSet?.candidates[0];
     if (!nextCandidateSet || !firstCandidate) return null;
 
+    candidateSetsRef.current.set(nextCandidateSet.id, nextCandidateSet);
     setChordMeasures(firstCandidate.voicedProgression);
     pushCandidateMessage(
       nextCandidateSet.id,
@@ -240,21 +326,37 @@ export function useHarmonyController({
     candidateSetId: string,
     candidateId: string,
   ) {
-    if (
-      !candidateSet ||
-      candidateSet.id !== candidateSetId ||
-      candidateSet.status !== "previewing"
-    ) {
+    if (candidateSet?.status === "previewing") {
+      if (candidateSet.id !== candidateSetId) return;
+      const candidate = candidateSet.candidates.find(
+        (item) => item.id === candidateId,
+      );
+      if (!candidate) return;
+
+      previewCandidate(candidateSetId, candidateId);
+      setChordMeasures(candidate.voicedProgression);
       return;
     }
 
-    const candidate = candidateSet.candidates.find(
-      (item) => item.id === candidateId,
-    );
-    if (!candidate) return;
+    const archived = candidateSetsRef.current.get(candidateSetId);
+    if (!archived) return;
+    const reopenedInput = prepareReopenedCandidateSet({
+      archived,
+      candidateId,
+      sessionId,
+      requestId: nextRequestId(),
+      currentProgression: lastProgressionRef.current,
+      currentVoicedProgression: chordMeasures,
+      currentInterpretation: aiInterpretation,
+    });
+    if (!reopenedInput) return;
+    const reopened = openCandidatePreview(reopenedInput);
+    if (!reopened) return;
 
-    previewCandidate(candidateSetId, candidateId);
-    setChordMeasures(candidate.voicedProgression);
+    candidateSetsRef.current.set(reopened.id, reopened);
+    setChordMeasures(reopened.candidates[0].voicedProgression);
+    pushCandidateMessage(reopened.id, reopened.mode, reopened.candidates);
+    setError(null);
   }
 
   function handleSelectCandidate(candidateSetId: string) {
@@ -273,10 +375,17 @@ export function useHarmonyController({
       setError("The previewed progression is no longer available.");
       return;
     }
+    if (committedCandidateSetsRef.current.has(candidateSetId)) return;
+    committedCandidateSetsRef.current.add(candidateSetId);
 
     commitProgressionState(
       selectedCandidate.progression,
       selectedCandidate.voicedProgression,
+      {
+        requestId: candidateSet.requestId,
+        interpretation: candidateSet.resultInterpretation,
+        source: "candidate_selection",
+      },
     );
     setAiInterpretation(candidateSet.resultInterpretation);
     pushProgressionCard(
@@ -318,6 +427,7 @@ export function useHarmonyController({
     aiInterpretation,
     candidateSet,
     chordMeasures,
+    history,
     lastProgressionRef,
     setAiInterpretation,
     commitProgressionState,

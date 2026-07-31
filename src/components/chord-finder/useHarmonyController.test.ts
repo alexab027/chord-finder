@@ -3,6 +3,7 @@ import { DEFAULT_INTERPRETED_STYLE } from "../../ai/types";
 import { toGenerationPreferences } from "../../ai/toGenerationPreferences";
 import { buildCandidatePool } from "../../harmony/candidates/buildCandidatePool";
 import { candidateHash } from "../../harmony/candidates/candidateHash";
+import type { CandidateSet } from "../../harmony/candidates/types";
 import { buildNamedChord } from "../../music/chords";
 import { rankProgressions } from "../../music/chordGeneration";
 import type {
@@ -12,7 +13,10 @@ import type {
   RevisionContext,
   ScoredChord,
 } from "../../music/types";
-import { prepareVisibleCandidates } from "./useHarmonyController";
+import {
+  prepareReopenedCandidateSet,
+  prepareVisibleCandidates,
+} from "./useHarmonyController";
 
 const cMajor: KeyContext = {
   signature: "C",
@@ -190,5 +194,86 @@ describe("prepareVisibleCandidates", () => {
           progression[3].chord.absoluteSymbol === "Am",
       ),
     ).toBe(true);
+  });
+
+  it("filters committed hashes before selecting generate-new roles", () => {
+    const preferences = toGenerationPreferences(DEFAULT_INTERPRETED_STYLE);
+    const first = prepareVisibleCandidates({
+      mode: "generate_new",
+      key: cMajor,
+      measures: emptyMeasures,
+      getRenderedPitchFn: noPitch,
+      style: preferences.style,
+      preferences,
+      currentProgression: null,
+      voiceProgressionFn: visibleVoicing,
+    });
+    const next = prepareVisibleCandidates({
+      mode: "generate_new",
+      key: cMajor,
+      measures: emptyMeasures,
+      getRenderedPitchFn: noPitch,
+      style: preferences.style,
+      preferences,
+      currentProgression: null,
+      seenHashes: first.map(({ symbolicHash }) => symbolicHash),
+      voiceProgressionFn: visibleVoicing,
+    });
+
+    expect(
+      next.every(
+        ({ symbolicHash }) =>
+          !first.some((candidate) => candidate.symbolicHash === symbolicHash),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("prepareReopenedCandidateSet", () => {
+  it("uses current committed state as the new base instead of stale archive state", () => {
+    const archivedBase = outsideGrammarBase();
+    const currentBase = outsideGrammarBase().map((item, index) =>
+      index === 0
+        ? { ...item, chord: buildNamedChord(aMinor, "Am")! }
+        : item,
+    );
+    const candidate = {
+      id: candidateHash(archivedBase),
+      symbolicHash: candidateHash(archivedBase),
+      role: "closest" as const,
+      progression: archivedBase,
+      voicedProgression: visibleVoicing(archivedBase),
+      totalScore: 1,
+    };
+    const archived: CandidateSet = {
+      id: "old-set",
+      sessionId: "session-old",
+      requestId: "request-old",
+      mode: "revise_existing",
+      keyLabel: "A minor",
+      commitLabel: "Updated",
+      baseProgression: archivedBase,
+      baseVoicedProgression: visibleVoicing(archivedBase),
+      baseInterpretation: null,
+      resultInterpretation: DEFAULT_INTERPRETED_STYLE,
+      candidates: [candidate],
+      previewedCandidateId: candidate.id,
+      status: "selected",
+    };
+    const currentVoicing = visibleVoicing(currentBase);
+    const reopened = prepareReopenedCandidateSet({
+      archived,
+      candidateId: candidate.id,
+      sessionId: "session-current",
+      requestId: "request-new",
+      currentProgression: currentBase,
+      currentVoicedProgression: currentVoicing,
+      currentInterpretation: DEFAULT_INTERPRETED_STYLE,
+    });
+
+    expect(reopened?.baseProgression).toBe(currentBase);
+    expect(reopened?.baseProgression).not.toBe(archived.baseProgression);
+    expect(reopened?.baseVoicedProgression).toEqual(currentVoicing);
+    expect(reopened?.requestId).toBe("request-new");
   });
 });

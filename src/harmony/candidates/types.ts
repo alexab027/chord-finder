@@ -57,6 +57,8 @@ export type ProgressionCandidate = {
 
 export type CandidateSet = {
   id: string;
+  sessionId: string;
+  requestId: string;
   mode: CandidateMode;
   keyLabel: string;
   commitLabel: "Generated" | "Updated";
