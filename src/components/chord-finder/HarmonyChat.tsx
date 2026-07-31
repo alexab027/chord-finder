@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, type KeyboardEvent } from "react";
+import type {
+  CandidateRole,
+  CandidateSet,
+} from "../../harmony/candidates/types";
 import type { CurrentProgressionItem } from "../../music/progressionPresentation";
-import type { CandidateRole, CandidateSet } from "./useCandidatePreview";
 
 export type ChatMessage =
   | { id: string; kind: "text"; role: "user" | "assistant"; text: string }

@@ -1,11 +1,11 @@
 import { buildKeyChords } from "../../music/chords";
+import type { CandidateRole } from "../../harmony/candidates/types";
 import type {
   ChordCandidate,
   KeyContext,
   ScoredChord,
   StyleOption,
 } from "../../music/types";
-import type { CandidateRole } from "./useCandidatePreview";
 
 type CandidateFixture = {
   id: string;

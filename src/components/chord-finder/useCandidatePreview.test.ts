@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_INTERPRETED_STYLE } from "../../ai/types";
-import {
-  candidatePreviewReducer,
-  type CandidateSet,
-} from "./useCandidatePreview";
+import type { CandidateSet } from "../../harmony/candidates/types";
+import { candidatePreviewReducer } from "./useCandidatePreview";
 
 function fixtureCandidateSet(): CandidateSet {
   return {
