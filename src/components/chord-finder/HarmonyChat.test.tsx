@@ -6,6 +6,7 @@ const candidateMessage: ChatMessage = {
   id: "message-1",
   kind: "candidates",
   candidateSetId: "candidate-set-1",
+  mode: "generate_new",
   candidates: [
     {
       id: "candidate-1",
@@ -67,7 +68,7 @@ describe("HarmonyChat candidate controls", () => {
       />,
     );
 
-    expect(markup).toContain("Option 1 — Closest");
+    expect(markup).toContain("Option 1 — Best Fit");
     expect(markup).toContain("Option 2 — More Different");
     expect(markup).toContain("Option 3 — Fresh Alternative");
     expect(markup).toContain("C – G – Am – F");
@@ -104,9 +105,41 @@ describe("HarmonyChat candidate controls", () => {
       />,
     );
 
-    expect(markup).toContain("Option 1 — Closest");
+    expect(markup).toContain("Option 1 — Best Fit");
     expect(markup).toContain("Option 2 — More Different");
     expect(markup).not.toContain("Option 3");
+  });
+
+  it("uses Closest for revision candidates", () => {
+    const revisionMessage: ChatMessage = {
+      ...candidateMessage,
+      mode: "revise_existing",
+    };
+    const markup = renderToStaticMarkup(
+      <HarmonyChat
+        candidatePreview={{
+          id: "candidate-set-1",
+          previewedCandidateId: "candidate-1",
+          status: "previewing",
+        }}
+        composerValue=""
+        error={null}
+        hasProgression
+        helperText="Helper"
+        isExplaining={false}
+        isGenerating={false}
+        messages={[revisionMessage]}
+        onCancelCandidate={noOp}
+        onComposerChange={noOp}
+        onPreviewCandidate={noOp}
+        onSelectCandidate={noOp}
+        onSubmit={noOp}
+        placeholder="Describe harmony"
+      />,
+    );
+
+    expect(markup).toContain("Option 1 — Closest");
+    expect(markup).not.toContain("Option 1 — Best Fit");
   });
 
   it("closes the action controls after selection", () => {

@@ -18,6 +18,7 @@ import {
   type ChordEditAction,
 } from "../harmony/actions";
 import { validateCandidatePool } from "../harmony/candidates/validateCandidate";
+import type { CandidateMode } from "../harmony/candidates/types";
 import { parsePureDirectEdits } from "../harmony/directEditParser";
 import {
   resolveHarmonyPreferences,
@@ -321,6 +322,7 @@ export default function Staff() {
     style,
     preferences,
     interpretation,
+    mode,
     commitLabel,
     requestedActions = [],
   }: {
@@ -329,6 +331,7 @@ export default function Staff() {
     style: StyleOption;
     preferences: GenerationPreferences;
     interpretation: InterpretedStyle;
+    mode: CandidateMode;
     commitLabel: "Generated" | "Updated";
     requestedActions?: ChordEditAction[];
   }) {
@@ -365,6 +368,7 @@ export default function Staff() {
     }
 
     const nextCandidateSet = openCandidatePreview({
+      mode,
       keyLabel: generatedKey.label,
       commitLabel,
       baseProgression: lastProgressionRef.current,
@@ -377,7 +381,11 @@ export default function Staff() {
     if (!nextCandidateSet || !firstCandidate) return;
 
     setChordMeasures(firstCandidate.voicedProgression);
-    pushCandidateMessage(nextCandidateSet.id, nextCandidateSet.candidates);
+    pushCandidateMessage(
+      nextCandidateSet.id,
+      nextCandidateSet.mode,
+      nextCandidateSet.candidates,
+    );
   }
 
   function handleGenerateNewProgression(
@@ -413,6 +421,7 @@ export default function Staff() {
       style: effectiveStyle,
       preferences,
       interpretation: resultInterpretation,
+      mode: "generate_new",
       commitLabel: "Generated",
       requestedActions,
     });
@@ -551,6 +560,7 @@ export default function Staff() {
       style: effectiveStyle,
       preferences: effectivePreferences,
       interpretation: appliedInterpretation,
+      mode: "revise_existing",
       commitLabel: "Updated",
     });
     setPendingClarification(null);

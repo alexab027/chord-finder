@@ -38,6 +38,13 @@ export type CandidatePoolOptions = {
   maxBaseCandidates: number;
 };
 
+export type RoleSelectedCandidate = CandidatePoolEntry & {
+  role: CandidateRole;
+  distanceFromBase?: number;
+  distanceFromBestFit?: number;
+  exactPositionMatches: number;
+};
+
 export type ProgressionCandidate = {
   id: string;
   role: CandidateRole;
@@ -47,6 +54,7 @@ export type ProgressionCandidate = {
 
 export type CandidateSet = {
   id: string;
+  mode: CandidateMode;
   keyLabel: string;
   commitLabel: "Generated" | "Updated";
   baseProgression: ScoredChord[] | null;

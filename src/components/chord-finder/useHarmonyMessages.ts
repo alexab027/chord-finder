@@ -1,5 +1,8 @@
 import { useRef, useState } from "react";
-import type { ProgressionCandidate } from "../../harmony/candidates/types";
+import type {
+  CandidateMode,
+  ProgressionCandidate,
+} from "../../harmony/candidates/types";
 import type { ScoredChord } from "../../music/types";
 import { buildProgressionIdentityItems } from "../../music/progressionPresentation";
 import type { ChatMessage } from "./HarmonyChat";
@@ -54,12 +57,14 @@ export function useHarmonyMessages() {
 
   function pushCandidateMessage(
     candidateSetId: string,
+    mode: CandidateMode,
     candidates: ProgressionCandidate[],
   ) {
     pushMessage({
       id: nextMessageId(),
       kind: "candidates",
       candidateSetId,
+      mode,
       candidates: candidates.map((candidate) => ({
         id: candidate.id,
         role: candidate.role,

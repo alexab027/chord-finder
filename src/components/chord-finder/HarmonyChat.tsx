@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import type {
+  CandidateMode,
   CandidateRole,
   CandidateSet,
 } from "../../harmony/candidates/types";
@@ -25,6 +26,7 @@ export type ChatMessage =
       id: string;
       kind: "candidates";
       candidateSetId: string;
+      mode: CandidateMode;
       candidates: Array<{
         id: string;
         role: CandidateRole;
@@ -54,11 +56,16 @@ type HarmonyChatProps = {
   onCancelCandidate: (candidateSetId: string) => void;
 };
 
-const CANDIDATE_ROLE_LABELS: Record<CandidateRole, string> = {
+const REVISION_CANDIDATE_ROLE_LABELS: Record<CandidateRole, string> = {
   closest: "Closest",
   moderate: "More Different",
   distinct: "Fresh Alternative",
 };
+
+function getCandidateRoleLabel(mode: CandidateMode, role: CandidateRole) {
+  if (mode === "generate_new" && role === "closest") return "Best Fit";
+  return REVISION_CANDIDATE_ROLE_LABELS[role];
+}
 
 function TextMessage({
   role,
@@ -160,6 +167,7 @@ function ExplanationMessage({
 
 function CandidateMessage({
   candidateSetId,
+  mode,
   candidates,
   candidatePreview,
   onPreviewCandidate,
@@ -167,6 +175,7 @@ function CandidateMessage({
   onCancelCandidate,
 }: {
   candidateSetId: string;
+  mode: CandidateMode;
   candidates: Extract<ChatMessage, { kind: "candidates" }>["candidates"];
   candidatePreview: CandidatePreviewSummary | null;
   onPreviewCandidate: (candidateSetId: string, candidateId: string) => void;
@@ -212,7 +221,7 @@ function CandidateMessage({
               type="button"
             >
               <span className="block text-sm font-semibold text-[var(--text)]">
-                Option {index + 1} — {CANDIDATE_ROLE_LABELS[candidate.role]}
+                Option {index + 1} — {getCandidateRoleLabel(mode, candidate.role)}
               </span>
               <span className="mt-1 block text-sm text-[var(--text-muted)]">
                 {candidate.items
@@ -279,6 +288,7 @@ function ChatEntry({
         candidatePreview={candidatePreview}
         candidates={message.candidates}
         candidateSetId={message.candidateSetId}
+        mode={message.mode}
         onCancelCandidate={onCancelCandidate}
         onPreviewCandidate={onPreviewCandidate}
         onSelectCandidate={onSelectCandidate}
