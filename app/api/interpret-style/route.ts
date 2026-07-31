@@ -8,6 +8,11 @@ import {
   type PendingClarification,
   type RevisionIntent,
 } from "@/src/ai/types";
+import {
+  GROQ_HARMONY_ROUTER_SCHEMA,
+  GROQ_HARMONY_ROUTER_SCHEMA_NAME,
+  type GroqHarmonyRouterOutput,
+} from "@/src/ai/harmonyRouterSchema";
 import type { StyleOption } from "@/src/music/types";
 import type {
   ChordEditAction,
@@ -20,7 +25,7 @@ const MAX_KEY_LENGTH = 40;
 const MAX_SUMMARY_LENGTH = 240;
 const MAX_MOOD_ITEMS = 5;
 const MAX_MOOD_LENGTH = 40;
-const MAX_PROGRESSION_MEASURES = 8;
+const MAX_PROGRESSION_MEASURES = 4;
 const MAX_SYMBOL_LENGTH = 40;
 // The staff is a fixed four measures; chord-edit actions address measures 1-4.
 const STAFF_MEASURE_COUNT = 4;
@@ -47,13 +52,13 @@ type CurrentProgressionItem = {
 
 // Shared, appended to both prompts. Lets the model express EXACT chord requests
 // as a small action list. It never returns chord pitch names — only scale
-// degree + quality (+ optional 7th) + measure, which the engine resolves
+// degree + quality (+ nullable 7th) + measure, which the engine resolves
 // deterministically against the current key.
 const ACTIONS_INSTRUCTIONS = `Exact chord edits ("actions"):
 - Also return an "actions" array. Use it ONLY for supported chord edits the user explicitly names; otherwise return "actions": [].
 - To set a specific chord at a measure, use scale degree (1-7) + quality:
   { "type": "set_chord", "measure": <1-4>, "degree": <1-7>, "quality": "major"|"minor"|"dominant"|"diminished", "extension": 7 }
-  Omit "extension" for a plain triad; include "extension": 7 for a seventh chord.
+  Use "extension": null for a plain triad; use "extension": 7 for a seventh chord.
 - To replace a measure with a literal chord name like "Am", "C", "G7", or "Dm7", use:
   { "type": "replace_chord", "measure": <1-4>, "chordName": "Am" }
 - To make one measure's chord identical to another's (e.g. "make the first and last chord the same"), use:
@@ -101,8 +106,9 @@ Rules:
   multi-clause request.
 - Use "answer_question" when the user asks about the current progression and no musical change should happen.
 - If the user asks to revise an existing progression but none exists, still classify as "revise_existing"; the application will guard it.
-- For "clarify", include a concise "clarificationQuestion".
-- For "answer_question", include a concise "assistantMessage". If there is no progression context, say that there is not enough progression to answer.
+- For "revise_existing", include a "revision" object. For every other intent, use "revision": null.
+- For "clarify", include a concise "clarificationQuestion". For every other intent, use "clarificationQuestion": null.
+- For "answer_question", include a concise "assistantMessage". For every other intent, use "assistantMessage": null. If there is no progression context, say that there is not enough progression to answer.
 - For "answer_question", use currentProgression.absoluteSymbol for ordinary chord names and currentProgression.romanNumeral for harmonic function. Both are trusted application context.
 - Distinguish harmonic transposition from voicing movement. "Transpose up two" is ambiguous; return "clarify". Do not return unsupported transposition or voicing actions.
 - Do not return an exact-edit action unless it is supported by the exact chord edits schema below.
@@ -133,27 +139,17 @@ All numeric fields are between 0 and 1. Respond with exactly this shape:
   "playabilityRequired": true,
   "mood": [],
   "summary": "",
-  "revision": {
-    "preserveOverallProgression": true,
-    "preserveChordPositions": [],
-    "changeAmount": 0.3,
-    "requestedChanges": {
-      "complexityDelta": 0.0,
-      "dissonanceDelta": 0.0,
-      "descendingBassDelta": 0.0,
-      "cadenceDelta": 0.0
-    }
-  },
+  "revision": null,
   "actions": [],
-  "clarificationQuestion": "",
-  "assistantMessage": ""
+  "clarificationQuestion": null,
+  "assistantMessage": null
 }
 
 Revision settings:
 - "revision.preserveOverallProgression": true to keep the same general progression, false to allow broad replacement.
 - "revision.preserveChordPositions": array of measure numbers the user explicitly wants kept the same (e.g. "keep the first two chords" -> [1, 2]). Empty if none.
 - "revision.changeAmount": 0 for a tiny tweak, 0.5 for moderate, 1 for a large change.
-- "revision.requestedChanges": numeric deltas in [-1, 1]. Positive means more, negative means less. Omit or use 0 when not requested:
+- "revision.requestedChanges": always include all four delta fields. Use a numeric delta in [-1, 1] when requested and null when not requested. Positive means more, negative means less:
   - "complexityDelta": "more complex / richer / add color" positive; "simpler" negative.
   - "dissonanceDelta": "more tense / dissonant" positive; "smoother / less dissonant" negative.
   - "descendingBassDelta": "make the bass descend more" positive.
@@ -900,7 +896,7 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
-  const model = process.env.GROQ_MODEL ?? "llama-3.1-8b-instant";
+  const model = process.env.GROQ_MODEL ?? "openai/gpt-oss-20b";
 
   try {
     // Fail fast into the graceful fallback below rather than hanging. The SDK
@@ -924,7 +920,16 @@ export async function POST(request: Request): Promise<Response> {
       model,
       temperature: 0,
       max_completion_tokens: 500,
-      response_format: { type: "json_object" },
+      reasoning_effort: "low",
+      include_reasoning: false,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: GROQ_HARMONY_ROUTER_SCHEMA_NAME,
+          strict: true,
+          schema: GROQ_HARMONY_ROUTER_SCHEMA,
+        },
+      },
       messages: [
         { role: "system", content: ROUTER_SYSTEM_PROMPT },
         { role: "user", content: userContent },
@@ -941,17 +946,10 @@ export async function POST(request: Request): Promise<Response> {
       });
     }
 
-    let parsed: {
-      intent?: unknown;
-      confidence?: unknown;
-      revision?: unknown;
-      actions?: unknown;
-      clarificationQuestion?: unknown;
-      assistantMessage?: unknown;
-    };
+    let parsed: GroqHarmonyRouterOutput;
 
     try {
-      parsed = JSON.parse(content) as typeof parsed;
+      parsed = JSON.parse(content) as GroqHarmonyRouterOutput;
     } catch {
       return json({
         ...DEFAULT_INTERPRETED_STYLE,
@@ -1019,12 +1017,17 @@ export async function POST(request: Request): Promise<Response> {
       });
     }
 
+    const resolvedRevision =
+      intent === "revise_existing"
+        ? sanitizeRevision(parsed.revision, currentProgression.length)
+        : undefined;
+
     if (intent === "revise_existing") {
       return json({
         ...interpretation,
         intent,
         confidence,
-        revision: sanitizeRevision(parsed.revision, currentProgression.length),
+        revision: resolvedRevision,
         actions,
       });
     }
