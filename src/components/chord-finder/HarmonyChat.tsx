@@ -53,6 +53,7 @@ type HarmonyChatProps = {
   onSubmit: () => void;
   onPreviewCandidate: (candidateSetId: string, candidateId: string) => void;
   onSelectCandidate: (candidateSetId: string) => void;
+  onExplainCandidate: (candidateSetId: string) => void;
   onCancelCandidate: (candidateSetId: string) => void;
 };
 
@@ -172,6 +173,7 @@ function CandidateMessage({
   candidatePreview,
   onPreviewCandidate,
   onSelectCandidate,
+  onExplainCandidate,
   onCancelCandidate,
 }: {
   candidateSetId: string;
@@ -180,6 +182,7 @@ function CandidateMessage({
   candidatePreview: CandidatePreviewSummary | null;
   onPreviewCandidate: (candidateSetId: string, candidateId: string) => void;
   onSelectCandidate: (candidateSetId: string) => void;
+  onExplainCandidate: (candidateSetId: string) => void;
   onCancelCandidate: (candidateSetId: string) => void;
 }) {
   const isCurrentSet = candidatePreview?.id === candidateSetId;
@@ -248,6 +251,13 @@ function CandidateMessage({
           </button>
           <button
             className="h-9 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm font-semibold text-[var(--text)] hover:bg-[var(--surface-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
+            onClick={() => onExplainCandidate(candidateSetId)}
+            type="button"
+          >
+            Why this option?
+          </button>
+          <button
+            className="h-9 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm font-semibold text-[var(--text)] hover:bg-[var(--surface-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
             onClick={() => onCancelCandidate(candidateSetId)}
             type="button"
           >
@@ -270,12 +280,14 @@ function ChatEntry({
   candidatePreview,
   onPreviewCandidate,
   onSelectCandidate,
+  onExplainCandidate,
   onCancelCandidate,
 }: {
   message: ChatMessage;
   candidatePreview: CandidatePreviewSummary | null;
   onPreviewCandidate: (candidateSetId: string, candidateId: string) => void;
   onSelectCandidate: (candidateSetId: string) => void;
+  onExplainCandidate: (candidateSetId: string) => void;
   onCancelCandidate: (candidateSetId: string) => void;
 }) {
   if (message.kind === "text") {
@@ -296,6 +308,7 @@ function ChatEntry({
         onCancelCandidate={onCancelCandidate}
         onPreviewCandidate={onPreviewCandidate}
         onSelectCandidate={onSelectCandidate}
+        onExplainCandidate={onExplainCandidate}
       />
     );
   }
@@ -321,6 +334,7 @@ export default function HarmonyChat({
   onSubmit,
   onPreviewCandidate,
   onSelectCandidate,
+  onExplainCandidate,
   onCancelCandidate,
 }: HarmonyChatProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -376,6 +390,7 @@ export default function HarmonyChat({
                 onCancelCandidate={onCancelCandidate}
                 onPreviewCandidate={onPreviewCandidate}
                 onSelectCandidate={onSelectCandidate}
+                onExplainCandidate={onExplainCandidate}
               />
             ))}
             {isExplaining && (

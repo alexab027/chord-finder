@@ -1,6 +1,7 @@
 import type { InterpretedStyle } from "../ai/types";
 import type { PlacedChord, ScoredChord } from "../music/types";
 import { candidateHash } from "./candidates/candidateHash";
+import type { CandidateExplanationFacts } from "./explanations/facts";
 
 export type HarmonyCommitSource =
   | "candidate_selection"
@@ -8,6 +9,7 @@ export type HarmonyCommitSource =
   | "generated";
 
 export type HarmonyHistoryEntry = {
+  schemaVersion: 1;
   id: string;
   sessionId: string;
   requestId: string;
@@ -16,11 +18,20 @@ export type HarmonyHistoryEntry = {
   voicedProgression: PlacedChord[][];
   interpretation: InterpretedStyle | null;
   source: HarmonyCommitSource;
+  explanationFacts?: CandidateExplanationFacts;
 };
 
 export type HarmonyHistory = {
   entries: HarmonyHistoryEntry[];
   seenHashes: string[];
+};
+
+export type HarmonyPersistenceSnapshotV1 = {
+  schemaVersion: 1;
+  sessionIds: string[];
+  commitIds: string[];
+  progressionIds: string[];
+  history: HarmonyHistory;
 };
 
 export const EMPTY_HARMONY_HISTORY: HarmonyHistory = {
@@ -30,7 +41,7 @@ export const EMPTY_HARMONY_HISTORY: HarmonyHistory = {
 
 export type RecordHarmonyCommitInput = Omit<
   HarmonyHistoryEntry,
-  "id" | "progressionId"
+  "id" | "progressionId" | "schemaVersion"
 >;
 
 function cloneVoicing(voicedProgression: readonly PlacedChord[][]) {
@@ -52,6 +63,25 @@ function cloneProgression(progression: readonly ScoredChord[]) {
   }));
 }
 
+function cloneExplanationFacts(facts?: CandidateExplanationFacts) {
+  if (!facts) return undefined;
+  return {
+    ...facts,
+    chordFacts: facts.chordFacts.map((fact) => ({
+      ...fact,
+      reasons: [...fact.reasons],
+    })),
+    relationToBase: facts.relationToBase
+      ? {
+          ...facts.relationToBase,
+          changedMeasures: [...facts.relationToBase.changedMeasures],
+        }
+      : undefined,
+    styleFacts: { ...facts.styleFacts },
+    exactEdits: facts.exactEdits.map((edit) => ({ ...edit })),
+  };
+}
+
 export function recordHarmonyCommit(
   history: HarmonyHistory,
   input: RecordHarmonyCommitInput,
@@ -62,6 +92,7 @@ export function recordHarmonyCommit(
   const progressionId = candidateHash(input.progression);
   const entry: HarmonyHistoryEntry = {
     ...input,
+    schemaVersion: 1,
     id,
     progressionId,
     progression: cloneProgression(input.progression),
@@ -69,6 +100,7 @@ export function recordHarmonyCommit(
     interpretation: input.interpretation
       ? { ...input.interpretation, mood: [...input.interpretation.mood] }
       : null,
+    explanationFacts: cloneExplanationFacts(input.explanationFacts),
   };
 
   return {
@@ -76,5 +108,20 @@ export function recordHarmonyCommit(
     seenHashes: history.seenHashes.includes(progressionId)
       ? history.seenHashes
       : [...history.seenHashes, progressionId],
+  };
+}
+
+export function buildHarmonyPersistenceSnapshot(
+  history: HarmonyHistory,
+): HarmonyPersistenceSnapshotV1 {
+  return {
+    schemaVersion: 1,
+    sessionIds: [...new Set(history.entries.map((entry) => entry.sessionId))],
+    commitIds: history.entries.map((entry) => entry.id),
+    progressionIds: [...history.seenHashes],
+    history: {
+      entries: [...history.entries],
+      seenHashes: [...history.seenHashes],
+    },
   };
 }

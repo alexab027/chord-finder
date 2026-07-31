@@ -18,6 +18,13 @@ import {
 import { applyChordEditTransaction } from "../harmony/actionTransaction";
 import { parsePureDirectEdits } from "../harmony/directEditParser";
 import {
+  buildCandidateExplanationFacts,
+} from "../harmony/explanations/facts";
+import {
+  answerFocusedHarmonyQuestion,
+  explainCandidateFacts,
+} from "../harmony/explanations/focusedAnswer";
+import {
   directEditRequest,
   normalizeHarmonyRequest,
 } from "../harmony/request";
@@ -114,6 +121,7 @@ export default function Staff() {
     aiInterpretation,
     candidateSet,
     chordMeasures,
+    history,
     lastProgressionRef,
     commitProgressionState,
     openCreativeCandidatePreview,
@@ -277,6 +285,8 @@ export default function Staff() {
     keyLabel: string,
     label: "Generated" | "Updated",
     preferences?: GenerationPreferences,
+    exactActions: readonly ChordEditAction[] = [],
+    requestSummary = "Direct chord edit",
   ) {
     const voicedProgression = voiceProgression(
       finalProgression,
@@ -284,7 +294,14 @@ export default function Staff() {
       getRenderedPitch,
       preferences,
     );
-    commitProgressionState(finalProgression, voicedProgression);
+    commitProgressionState(finalProgression, voicedProgression, {
+      explanationFacts: buildCandidateExplanationFacts({
+        progression: finalProgression,
+        activeKey: keyLabel,
+        requestSummary,
+        exactActions,
+      }),
+    });
     pushProgressionCard(label, keyLabel, finalProgression);
     return voicedProgression;
   }
@@ -340,6 +357,8 @@ export default function Staff() {
       exactActions: requestedActions,
       mode: "generate_new",
       commitLabel: "Generated",
+      requestSummary:
+        normalizedPrompt || "Generate the best-fitting progression.",
     });
     setPendingClarification(null);
   }
@@ -430,6 +449,7 @@ export default function Staff() {
       exactActions: requestedActions,
       mode: "revise_existing",
       commitLabel: "Updated",
+      requestSummary: normalizedPrompt,
     });
     setPendingClarification(null);
   }
@@ -475,6 +495,8 @@ export default function Staff() {
       generatedKey.label,
       "Updated",
       effectivePreferences,
+      actions,
+      normalizedPrompt,
     );
     setPendingClarification(null);
   }
@@ -512,6 +534,28 @@ export default function Staff() {
       measures,
       getRenderedPitch,
     );
+    const progressionId = buildCandidateExplanationFacts({
+      progression: currentProgression,
+      activeKey: generatedKey.label,
+      requestSummary: normalizedPrompt,
+    }).progressionId;
+    const committedFacts = [...history.entries]
+      .reverse()
+      .find((entry) => entry.progressionId === progressionId)?.explanationFacts;
+    const facts = committedFacts ?? buildCandidateExplanationFacts({
+      progression: currentProgression,
+      activeKey: generatedKey.label,
+      requestSummary: normalizedPrompt,
+    });
+    const focusedAnswer = answerFocusedHarmonyQuestion({
+      question: normalizedPrompt,
+      progression: currentProgression,
+      facts,
+    });
+    if (focusedAnswer) {
+      pushExplanationMessage(focusedAnswer.overview, focusedAnswer.measures);
+      return;
+    }
     const request = buildExplanationRequest(
       currentProgression,
       chordMeasures,
@@ -529,6 +573,16 @@ export default function Staff() {
     }
 
     void requestExplanation(request);
+  }
+
+  function handleExplainCandidate(candidateSetId: string) {
+    if (!candidateSet || candidateSet.id !== candidateSetId) return;
+    const candidate = candidateSet.candidates.find(
+      (item) => item.id === candidateSet.previewedCandidateId,
+    );
+    if (!candidate?.explanationFacts) return;
+    const answer = explainCandidateFacts(candidate.explanationFacts);
+    pushExplanationMessage(answer.overview, answer.measures);
   }
 
   // Route first, then generate, revise, clarify, or answer.
@@ -699,6 +753,14 @@ export default function Staff() {
     commitProgressionState(
       next,
       voiceProgression(next, measures, getRenderedPitch, preferences),
+      {
+        explanationFacts: buildCandidateExplanationFacts({
+          progression: next,
+          activeKey: editedKey.label,
+          requestSummary: "Developer exact chord edit",
+          exactActions: [action],
+        }),
+      },
     );
     pushProgressionCard("Updated", editedKey.label, next);
     // We do NOT auto-request an explanation here: copied chords carry stale
@@ -846,6 +908,7 @@ export default function Staff() {
         onComposerChange={setStylePrompt}
         onPreviewCandidate={handlePreviewCandidate}
         onSelectCandidate={handleSelectCandidate}
+        onExplainCandidate={handleExplainCandidate}
         onSubmit={handleGenerateProgression}
         placeholder={hasProgression ? REVISION_PLACEHOLDER : FRESH_PLACEHOLDER}
       />

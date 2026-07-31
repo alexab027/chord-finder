@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_INTERPRETED_STYLE } from "../ai/types";
 import { buildRequestedChord } from "../music/chords";
 import type { KeyContext, ScoredChord } from "../music/types";
-import { EMPTY_HARMONY_HISTORY, recordHarmonyCommit } from "./history";
+import {
+  buildHarmonyPersistenceSnapshot,
+  EMPTY_HARMONY_HISTORY,
+  recordHarmonyCommit,
+} from "./history";
 
 const cMajor: KeyContext = {
   signature: "C",
@@ -38,6 +42,7 @@ describe("recordHarmonyCommit", () => {
 
     expect(twice).toBe(once);
     expect(twice.entries).toHaveLength(1);
+    expect(twice.entries[0].schemaVersion).toBe(1);
     expect(() => JSON.stringify(twice)).not.toThrow();
   });
 
@@ -54,5 +59,19 @@ describe("recordHarmonyCommit", () => {
 
     expect(different.entries).toHaveLength(3);
     expect(different.seenHashes).toHaveLength(2);
+  });
+
+  it("builds a versioned JSON-safe snapshot with stable identity references", () => {
+    const history = recordHarmonyCommit(
+      EMPTY_HARMONY_HISTORY,
+      commit("req-1"),
+    );
+    const snapshot = buildHarmonyPersistenceSnapshot(history);
+    const roundTrip = JSON.parse(JSON.stringify(snapshot));
+
+    expect(roundTrip.schemaVersion).toBe(1);
+    expect(roundTrip.sessionIds).toEqual(["session-1"]);
+    expect(roundTrip.commitIds).toEqual(["session-1:req-1"]);
+    expect(roundTrip.progressionIds).toEqual(history.seenHashes);
   });
 });

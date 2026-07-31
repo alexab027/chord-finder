@@ -11,6 +11,7 @@ import type {
   ProgressionCandidate,
 } from "../../harmony/candidates/types";
 import { validateCandidatePool } from "../../harmony/candidates/validateCandidate";
+import { buildCandidateExplanationFacts } from "../../harmony/explanations/facts";
 import {
   EMPTY_HARMONY_HISTORY,
   recordHarmonyCommit,
@@ -56,6 +57,7 @@ export function prepareReopenedCandidateSet({
   return {
     sessionId,
     requestId,
+    requestSummary: archived.requestSummary,
     mode: archived.mode,
     keyLabel: archived.keyLabel,
     commitLabel: archived.commitLabel,
@@ -68,7 +70,21 @@ export function prepareReopenedCandidateSet({
     candidates: [
       candidate,
       ...archived.candidates.filter((item) => item.id !== candidateId),
-    ],
+    ].map((item) => ({
+      ...item,
+      explanationFacts: {
+        ...buildCandidateExplanationFacts({
+          progression: item.progression,
+          activeKey: archived.keyLabel,
+          requestSummary:
+            archived.requestSummary ?? "Reopened candidate preview",
+          candidateRole: item.role,
+          candidateSource: item.explanationFacts?.candidateSource,
+          baseProgression: currentProgression,
+        }),
+        exactEdits: item.explanationFacts?.exactEdits ?? [],
+      },
+    })),
   };
 }
 
@@ -84,6 +100,7 @@ export type PrepareVisibleCandidatesInput = {
   exactActions?: readonly ChordEditAction[];
   seenHashes?: readonly string[];
   voiceProgressionFn?: VoiceProgressionFn;
+  requestSummary?: string;
 };
 
 export function prepareVisibleCandidates({
@@ -98,6 +115,7 @@ export function prepareVisibleCandidates({
   exactActions = [],
   seenHashes = [],
   voiceProgressionFn = voiceProgression,
+  requestSummary = "Generate the best-fitting progression.",
 }: PrepareVisibleCandidatesInput): ProgressionCandidate[] {
   const pool = buildCandidatePool({
     mode,
@@ -163,6 +181,15 @@ export function prepareVisibleCandidates({
             ),
             totalScore: candidate.totalScore,
             distanceFromBase: candidate.distanceFromBase,
+            explanationFacts: buildCandidateExplanationFacts({
+              progression: candidate.progression,
+              activeKey: key.label,
+              requestSummary,
+              candidateRole: candidate.role,
+              candidateSource: candidate.source,
+              baseProgression: currentProgression,
+              exactActions,
+            }),
           },
         ];
       } catch {
@@ -193,10 +220,11 @@ type UseHarmonyControllerOptions = {
 
 type OpenCreativePreviewInput = Omit<
   PrepareVisibleCandidatesInput,
-  "currentProgression" | "voiceProgressionFn"
+  "currentProgression" | "voiceProgressionFn" | "requestSummary"
 > & {
   resultInterpretation: InterpretedStyle;
   commitLabel: "Generated" | "Updated";
+  requestSummary: string;
 };
 
 export function useHarmonyController({
@@ -240,6 +268,7 @@ export function useHarmonyController({
       requestId?: string;
       interpretation?: InterpretedStyle | null;
       source?: HarmonyCommitSource;
+      explanationFacts?: NonNullable<ProgressionCandidate["explanationFacts"]>;
     } = {},
   ) {
     lastProgressionRef.current = progression;
@@ -253,6 +282,7 @@ export function useHarmonyController({
         voicedProgression,
         interpretation: metadata.interpretation ?? aiInterpretation,
         source: metadata.source ?? "direct_edit",
+        explanationFacts: metadata.explanationFacts,
       }),
     );
   }
@@ -268,6 +298,7 @@ export function useHarmonyController({
     resultInterpretation,
     commitLabel,
     exactActions,
+    requestSummary,
   }: OpenCreativePreviewInput) {
     let candidates: ProgressionCandidate[];
     try {
@@ -280,6 +311,7 @@ export function useHarmonyController({
         preferences,
         revision,
         exactActions,
+        requestSummary,
         seenHashes: history.seenHashes,
         currentProgression: lastProgressionRef.current,
       });
@@ -299,6 +331,7 @@ export function useHarmonyController({
     const nextCandidateSet = openCandidatePreview({
       sessionId,
       requestId: nextRequestId(),
+      requestSummary,
       mode,
       keyLabel: key.label,
       commitLabel,
@@ -385,6 +418,7 @@ export function useHarmonyController({
         requestId: candidateSet.requestId,
         interpretation: candidateSet.resultInterpretation,
         source: "candidate_selection",
+        explanationFacts: selectedCandidate.explanationFacts,
       },
     );
     setAiInterpretation(candidateSet.resultInterpretation);

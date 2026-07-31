@@ -1,4 +1,5 @@
 import type { InterpretedStyle } from "../../ai/types";
+import type { CandidateExplanationFacts } from "../explanations/facts";
 import type {
   GenerationPreferences,
   KeyContext,
@@ -55,12 +56,14 @@ export type ProgressionCandidate = {
   voicedProgression: PlacedChord[][];
   totalScore: number;
   distanceFromBase?: number;
+  explanationFacts?: CandidateExplanationFacts;
 };
 
 export type CandidateSet = {
   id: string;
   sessionId: string;
   requestId: string;
+  requestSummary?: string;
   mode: CandidateMode;
   keyLabel: string;
   commitLabel: "Generated" | "Updated";

@@ -44,7 +44,7 @@ const candidateMessage: ChatMessage = {
 const noOp = () => {};
 
 describe("HarmonyChat candidate controls", () => {
-  it("shows three progression options with Select and Cancel", () => {
+  it("shows three progression options with explanation, Select, and Cancel controls", () => {
     const markup = renderToStaticMarkup(
       <HarmonyChat
         candidatePreview={{
@@ -61,6 +61,7 @@ describe("HarmonyChat candidate controls", () => {
         messages={[candidateMessage]}
         onCancelCandidate={noOp}
         onComposerChange={noOp}
+        onExplainCandidate={noOp}
         onPreviewCandidate={noOp}
         onSelectCandidate={noOp}
         onSubmit={noOp}
@@ -73,6 +74,7 @@ describe("HarmonyChat candidate controls", () => {
     expect(markup).toContain("Option 3 — Fresh Alternative");
     expect(markup).toContain("C – G – Am – F");
     expect(markup).toContain(">Select</button>");
+    expect(markup).toContain(">Why this option?</button>");
     expect(markup).toContain(">Cancel</button>");
     expect(markup).toContain("Choose an option above");
   });
@@ -98,6 +100,7 @@ describe("HarmonyChat candidate controls", () => {
         messages={[twoCandidateMessage]}
         onCancelCandidate={noOp}
         onComposerChange={noOp}
+        onExplainCandidate={noOp}
         onPreviewCandidate={noOp}
         onSelectCandidate={noOp}
         onSubmit={noOp}
@@ -131,6 +134,7 @@ describe("HarmonyChat candidate controls", () => {
         messages={[revisionMessage]}
         onCancelCandidate={noOp}
         onComposerChange={noOp}
+        onExplainCandidate={noOp}
         onPreviewCandidate={noOp}
         onSelectCandidate={noOp}
         onSubmit={noOp}
@@ -159,6 +163,7 @@ describe("HarmonyChat candidate controls", () => {
         messages={[candidateMessage]}
         onCancelCandidate={noOp}
         onComposerChange={noOp}
+        onExplainCandidate={noOp}
         onPreviewCandidate={noOp}
         onSelectCandidate={noOp}
         onSubmit={noOp}
@@ -191,6 +196,7 @@ describe("HarmonyChat candidate controls", () => {
         messages={[candidateMessage]}
         onCancelCandidate={noOp}
         onComposerChange={noOp}
+        onExplainCandidate={noOp}
         onPreviewCandidate={noOp}
         onSelectCandidate={noOp}
         onSubmit={noOp}
