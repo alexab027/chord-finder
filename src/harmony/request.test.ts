@@ -60,6 +60,27 @@ describe("normalizeHarmonyRequest", () => {
     expect(normalized.intent).toBe("revise_existing");
   });
 
+  it("adds locally parsed keep constraints when the model omits the action", () => {
+    const normalized = normalizeHarmonyRequest({
+      response: response({
+        revision: {
+          preserveOverallProgression: true,
+          preserveChordPositions: [4],
+          changeAmount: 0.5,
+          requestedChanges: { complexityDelta: 0.5 },
+        },
+        actions: [],
+      }),
+      measureCount: 4,
+      prompt: "make it jazzier but keep measure four an Am",
+    });
+
+    expect(normalized).toMatchObject({
+      intent: "revise_existing",
+      actions: [{ type: "replace_chord", measure: 4, chordName: "Am" }],
+    });
+  });
+
   it("turns conflicting output into clarification with no executable actions", () => {
     const normalized = normalizeHarmonyRequest({
       response: response({

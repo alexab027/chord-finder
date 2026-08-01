@@ -17,6 +17,7 @@ import {
 } from "../harmony/actions";
 import { applyChordEditTransaction } from "../harmony/actionTransaction";
 import { parsePureDirectEdits } from "../harmony/directEditParser";
+import { candidateHash } from "../harmony/candidates/candidateHash";
 import {
   buildCandidateExplanationFacts,
 } from "../harmony/explanations/facts";
@@ -37,6 +38,10 @@ import {
 } from "../harmony/preferences";
 import { useHarmonyMessages } from "./chord-finder/useHarmonyMessages";
 import { useHarmonyController } from "./chord-finder/useHarmonyController";
+import {
+  harmonyDebug,
+  harmonyDebugError,
+} from "./chord-finder/harmonyDebug";
 import type {
   DurationName,
   GenerationMode,
@@ -132,6 +137,7 @@ export default function Staff() {
   } = useHarmonyController({
     pushCandidateMessage,
     pushProgressionCard,
+    pushAssistantMessage,
     setError: setAiError,
     resolvePendingClarification: () => setPendingClarification(null),
   });
@@ -241,8 +247,17 @@ export default function Staff() {
           pendingClarification,
         }),
       });
-      return (await response.json()) as HarmonyRouterResponse;
-    } catch {
+      const result = (await response.json()) as HarmonyRouterResponse;
+      harmonyDebug("interpretation_received", {
+        httpStatus: response.status,
+        intent: result.intent,
+        warning: result.warning ?? null,
+        actionCount: result.actions?.length ?? 0,
+        revision: result.revision ?? null,
+      });
+      return result;
+    } catch (error) {
+      harmonyDebugError("interpretation_request_failed", error, { prompt });
       return null;
     }
   }
@@ -318,6 +333,9 @@ export default function Staff() {
         key: generatedKey,
       });
     } catch (editError) {
+      harmonyDebugError("direct_edit_failed", editError, {
+        actions: requestedActions,
+      });
       setAiError(
         editError instanceof HarmonyActionError
           ? editError.message
@@ -490,6 +508,19 @@ export default function Staff() {
     // surfacing the error via setAiError). Don't claim a successful update then.
     if (finalProgression === previousProgression) return;
 
+    if (candidateHash(finalProgression) === candidateHash(previousProgression)) {
+      harmonyDebug("direct_edit_no_op", {
+        prompt: normalizedPrompt,
+        actions,
+        progressionId: candidateHash(previousProgression),
+      });
+      pushAssistantMessage(
+        "That exact edit is already reflected in the current progression, so nothing changed.",
+      );
+      setPendingClarification(null);
+      return;
+    }
+
     renderProgression(
       finalProgression,
       generatedKey.label,
@@ -498,6 +529,13 @@ export default function Staff() {
       actions,
       normalizedPrompt,
     );
+    harmonyDebug("direct_edit_applied", {
+      prompt: normalizedPrompt,
+      actions,
+      activeKey: generatedKey.label,
+      before: previousProgression.map(({ chord }) => chord.absoluteSymbol),
+      after: finalProgression.map(({ chord }) => chord.absoluteSymbol),
+    });
     setPendingClarification(null);
   }
 
@@ -552,6 +590,12 @@ export default function Staff() {
       progression: currentProgression,
       facts,
     });
+    harmonyDebug("focused_question_resolution", {
+      question: normalizedPrompt,
+      progressionId,
+      usedStoredFacts: Boolean(committedFacts),
+      resolvedLocally: Boolean(focusedAnswer),
+    });
     if (focusedAnswer) {
       pushExplanationMessage(focusedAnswer.overview, focusedAnswer.measures);
       return;
@@ -591,6 +635,11 @@ export default function Staff() {
     setAiError(null);
 
     const normalizedPrompt = stylePrompt.trim();
+    harmonyDebug("request_submitted", {
+      prompt: normalizedPrompt || "Generate best-fit progression",
+      hasCommittedProgression: Boolean(lastProgressionRef.current?.length),
+      candidatePreviewStatus: candidateSet?.status ?? null,
+    });
     // Record the user's turn in the conversation, then clear the input so the
     // chat reads as a back-and-forth. A blank prompt means "best fit for me".
     pushUserMessage(
@@ -617,6 +666,16 @@ export default function Staff() {
           normalizedPrompt,
           previousProgression.length,
         );
+        harmonyDebug("direct_edit_parse", {
+          prompt: normalizedPrompt,
+          matched: Boolean(directEdits),
+          fallbackReason: directEdits
+            ? null
+            : /\b(?:measure|chord|bar)\b/i.test(normalizedPrompt)
+              ? "exact-edit-like prompt did not match supported syntax"
+              : "prompt is not a pure exact edit",
+          actions: directEdits ?? [],
+        });
         if (directEdits) {
           let request;
           try {
@@ -658,6 +717,11 @@ export default function Staff() {
       );
 
       if (!data || data.warning) {
+        harmonyDebug("interpretation_rejected", {
+          prompt: normalizedPrompt,
+          responseReceived: Boolean(data),
+          warning: data?.warning ?? null,
+        });
         setAiError(
           data?.warning ??
             "AI interpretation was unavailable. Nothing was changed.",
@@ -669,6 +733,11 @@ export default function Staff() {
         response: data,
         measureCount: previousProgression?.length ?? 4,
         prompt: normalizedPrompt,
+      });
+      harmonyDebug("request_normalized", {
+        prompt: normalizedPrompt,
+        intent: request.intent,
+        actions: "actions" in request ? request.actions : [],
       });
 
       switch (request.intent) {
@@ -705,7 +774,9 @@ export default function Staff() {
           break;
       }
     } catch (error) {
-      console.error("generateProgression failed:", error);
+      harmonyDebugError("request_failed", error, {
+        prompt: normalizedPrompt,
+      });
       setAiError("Something went wrong while generating. Please try again.");
     } finally {
       setIsGenerating(false);

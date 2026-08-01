@@ -15,6 +15,7 @@ import type {
   ScoredChord,
 } from "../../music/types";
 import {
+  getStyleBoundaryNotice,
   prepareReopenedCandidateSet,
   prepareVisibleCandidates,
 } from "./useHarmonyController";
@@ -304,5 +305,19 @@ describe("prepareReopenedCandidateSet", () => {
     expect(reopened?.baseProgression).not.toBe(archived.baseProgression);
     expect(reopened?.baseVoicedProgression).toEqual(currentVoicing);
     expect(reopened?.requestId).toBe("request-new");
+  });
+});
+
+describe("getStyleBoundaryNotice", () => {
+  it("recognizes the absolute four-measure jazz-color ceiling", () => {
+    const notice = getStyleBoundaryNotice("jazzy", outsideGrammarBase());
+
+    expect(notice).toMatchObject({
+      currentMetric: 8,
+      absoluteBoundary: 8,
+      atAbsoluteBoundary: true,
+    });
+    expect(notice.message).toContain("already very jazzy");
+    expect(notice.message).toContain("different options");
   });
 });

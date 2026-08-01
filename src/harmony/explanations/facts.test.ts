@@ -85,4 +85,21 @@ describe("candidate explanation facts", () => {
     );
     expect(transitionAnswer?.overview).toContain("dominant-to-tonic");
   });
+
+  it("accepts word-number measure references in focused questions", () => {
+    const chords = progression(["C", "Dm", "G", "C"]);
+    const facts = buildCandidateExplanationFacts({
+      progression: chords,
+      activeKey: "C major",
+      requestSummary: "Explain measure three",
+    });
+
+    expect(
+      answerFocusedHarmonyQuestion({
+        question: "why is measure three this chord",
+        progression: chords,
+        facts,
+      })?.measures[0],
+    ).toMatchObject({ measure: 3, chord: "G" });
+  });
 });

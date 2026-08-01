@@ -66,11 +66,16 @@ function inRange(measure: number, measureCount: number): boolean {
 // chord to X". One measure, one chord. Emitted as replace_chord so the literal
 // name is resolved by buildNamedChord in the shared engine.
 const SINGLE_KEYWORD_FIRST = new RegExp(
-  `^\\s*(?:change|set|make|replace|update)\\s+(?:the\\s+)?(?:measure|chord|bar)\\s+(${TARGET})(?:st|nd|rd|th)?\\s+(?:to|with|=)\\s+(${CHORD})\\s*[.!?]?\\s*$`,
+  `^\\s*(?:change|set|make|replace|update)\\s+(?:the\\s+)?(?:measure|chord|bar)\\s+(${TARGET})(?:st|nd|rd|th)?\\s+(?:(?:to|with|=)\\s+)?(?:an?\\s+)?(${CHORD})\\s*[.!?]?\\s*$`,
   "i",
 );
 const SINGLE_ORDINAL_FIRST = new RegExp(
-  `^\\s*(?:change|set|make|replace|update)\\s+(?:the\\s+)?(${TARGET})(?:st|nd|rd|th)?\\s+(?:measure|chord|bar)\\s+(?:to|with|=)\\s+(${CHORD})\\s*[.!?]?\\s*$`,
+  `^\\s*(?:change|set|make|replace|update)\\s+(?:the\\s+)?(${TARGET})(?:st|nd|rd|th)?\\s+(?:measure|chord|bar)\\s+(?:(?:to|with|=)\\s+)?(?:an?\\s+)?(${CHORD})\\s*[.!?]?\\s*$`,
+  "i",
+);
+
+const KEEP_CHORD = new RegExp(
+  `^\\s*keep\\s+(?:the\\s+)?(?:measure|chord|bar)\\s+(${TARGET})(?:st|nd|rd|th)?\\s+(?:(?:as|at|to|=)\\s+)?(?:an?\\s+)?(${CHORD})\\s*[.!?]?\\s*$`,
   "i",
 );
 
@@ -96,7 +101,9 @@ function parseSingleEdit(
   measureCount: number,
 ): ChordEditAction[] | null {
   const match =
-    SINGLE_KEYWORD_FIRST.exec(prompt) ?? SINGLE_ORDINAL_FIRST.exec(prompt);
+    SINGLE_KEYWORD_FIRST.exec(prompt) ??
+    SINGLE_ORDINAL_FIRST.exec(prompt) ??
+    KEEP_CHORD.exec(prompt);
   if (!match) return null;
 
   const measure = tokenToMeasure(match[1]);
@@ -105,6 +112,22 @@ function parseSingleEdit(
   if (!isValidChordName(chordName)) return null;
 
   return [{ type: "replace_chord", measure, chordName }];
+}
+
+/**
+ * Extracts explicit chord placements from mixed creative requests without
+ * treating the whole request as a direct edit. Unrecognized clauses remain for
+ * the interpretation layer; recognized placements become hard constraints.
+ */
+export function parseExplicitChordConstraints(
+  prompt: string,
+  measureCount: number,
+): ChordEditAction[] {
+  if (measureCount < 1) return [];
+  return prompt
+    .replace(/[.!?]+$/, "")
+    .split(/\s*(?:;|\band\b|\bbut\b)\s*/i)
+    .flatMap((clause) => parseSingleEdit(clause.trim(), measureCount) ?? []);
 }
 
 function parseCopyEdit(

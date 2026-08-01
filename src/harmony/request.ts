@@ -4,6 +4,7 @@ import type {
 } from "../ai/types";
 import type { ChordEditAction } from "./actions";
 import { validateChordEditTransaction } from "./actionTransaction";
+import { parseExplicitChordConstraints } from "./directEditParser";
 
 export type HarmonyRequest =
   | { intent: "direct_edit"; actions: ChordEditAction[] }
@@ -59,7 +60,13 @@ export function normalizeHarmonyRequest({
   measureCount: number;
   prompt?: string;
 }): HarmonyRequest {
-  const actions = response.actions ?? [];
+  const localConstraints = parseExplicitChordConstraints(prompt, measureCount);
+  const actions = [...(response.actions ?? []), ...localConstraints].filter(
+    (action, index, all) =>
+      all.findIndex((candidate) =>
+        JSON.stringify(candidate) === JSON.stringify(action),
+      ) === index,
+  );
 
   if (response.intent === "clarify") {
     return {

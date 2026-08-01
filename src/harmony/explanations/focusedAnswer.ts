@@ -6,6 +6,22 @@ export type FocusedHarmonyAnswer = {
   measures: Array<{ measure: number; chord: string; explanation: string }>;
 };
 
+const MEASURE_TOKEN = "\\d+|one|two|three|four|first|second|third|fourth";
+
+function measureNumber(token: string) {
+  const words: Record<string, number> = {
+    one: 1,
+    first: 1,
+    two: 2,
+    second: 2,
+    three: 3,
+    third: 3,
+    four: 4,
+    fourth: 4,
+  };
+  return words[token.toLowerCase()] ?? Number(token);
+}
+
 function candidateOverview(facts: CandidateExplanationFacts) {
   const relation = facts.relationToBase;
   const changed = relation?.changedMeasures ?? [];
@@ -49,11 +65,13 @@ export function answerFocusedHarmonyQuestion({
   }
 
   const transitionMatch = normalized.match(
-    /(?:measure|chord)s?\s*(\d+)\s*(?:to|through|and|into|between)\s*(?:measure|chord)?s?\s*(\d+)/,
+    new RegExp(
+      `(?:measure|chord)s?\\s*(${MEASURE_TOKEN})\\s*(?:to|through|and|into|between)\\s*(?:measure|chord)?s?\\s*(${MEASURE_TOKEN})`,
+    ),
   );
   if (transitionMatch) {
-    const fromMeasure = Number(transitionMatch[1]);
-    const toMeasure = Number(transitionMatch[2]);
+    const fromMeasure = measureNumber(transitionMatch[1]);
+    const toMeasure = measureNumber(transitionMatch[2]);
     const transition = buildTransitionFacts(progression).find(
       (fact) =>
         fact.fromMeasure === Math.min(fromMeasure, toMeasure) &&
@@ -67,9 +85,11 @@ export function answerFocusedHarmonyQuestion({
     }
   }
 
-  const measureMatch = normalized.match(/(?:measure|chord)\s*(\d+)/);
+  const measureMatch = normalized.match(
+    new RegExp(`(?:measure|chord)\\s*(${MEASURE_TOKEN})`),
+  );
   if (!measureMatch) return null;
-  const measure = Number(measureMatch[1]);
+  const measure = measureNumber(measureMatch[1]);
   const chordFact = facts.chordFacts.find((fact) => fact.measure === measure);
   if (!chordFact) return null;
   const provenance = facts.exactEdits.find(
