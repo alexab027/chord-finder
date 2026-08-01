@@ -1,6 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import HarmonyChat, { type ChatMessage } from "./HarmonyChat";
+import HarmonyChat, {
+  getComposerSubmissionBlock,
+  type ChatMessage,
+} from "./HarmonyChat";
 
 const candidateMessage: ChatMessage = {
   id: "message-1",
@@ -44,6 +47,27 @@ const candidateMessage: ChatMessage = {
 const noOp = () => {};
 
 describe("HarmonyChat candidate controls", () => {
+  it("blocks submission only while busy or awaiting a candidate decision", () => {
+    expect(
+      getComposerSubmissionBlock({
+        isGenerating: true,
+        isPreviewingCandidates: false,
+      }),
+    ).toBe("busy");
+    expect(
+      getComposerSubmissionBlock({
+        isGenerating: false,
+        isPreviewingCandidates: true,
+      }),
+    ).toBe("choose_candidate");
+    expect(
+      getComposerSubmissionBlock({
+        isGenerating: false,
+        isPreviewingCandidates: false,
+      }),
+    ).toBeNull();
+  });
+
   it("shows three progression options with explanation, Select, and Cancel controls", () => {
     const markup = renderToStaticMarkup(
       <HarmonyChat
@@ -69,14 +93,18 @@ describe("HarmonyChat candidate controls", () => {
       />,
     );
 
-    expect(markup).toContain("Option 1 — Best Fit");
-    expect(markup).toContain("Option 2 — More Different");
-    expect(markup).toContain("Option 3 — Fresh Alternative");
+    expect(markup).toContain(">Best Fit</span>");
+    expect(markup).toContain(">Alternate Best Fit</span>");
+    expect(markup).toContain(">Unique Fit</span>");
+    expect(markup).not.toContain("Option 1");
     expect(markup).toContain("C – G – Am – F");
     expect(markup).toContain(">Select</button>");
     expect(markup).toContain(">Why this option?</button>");
     expect(markup).toContain(">Cancel</button>");
-    expect(markup).toContain("Choose an option above");
+    expect(markup).toContain('aria-label="Send harmony request"');
+    expect(markup).not.toContain("Preview each option");
+    expect(markup).not.toContain("Choose an option to open a fresh preview");
+    expect(markup).not.toContain("Choose an option above.");
   });
 
   it("renders an honest candidate count below three", () => {
@@ -108,12 +136,12 @@ describe("HarmonyChat candidate controls", () => {
       />,
     );
 
-    expect(markup).toContain("Option 1 — Best Fit");
-    expect(markup).toContain("Option 2 — More Different");
-    expect(markup).not.toContain("Option 3");
+    expect(markup).toContain(">Best Fit</span>");
+    expect(markup).toContain(">Alternate Best Fit</span>");
+    expect(markup).not.toContain(">Unique Fit</span>");
   });
 
-  it("uses Closest for revision candidates", () => {
+  it("uses the same concise role labels for revision candidates", () => {
     const revisionMessage: ChatMessage = {
       ...candidateMessage,
       mode: "revise_existing",
@@ -142,8 +170,8 @@ describe("HarmonyChat candidate controls", () => {
       />,
     );
 
-    expect(markup).toContain("Option 1 — Closest");
-    expect(markup).not.toContain("Option 1 — Best Fit");
+    expect(markup).toContain(">Best Fit</span>");
+    expect(markup).not.toContain("Closest");
   });
 
   it("closes the action controls after selection", () => {
@@ -171,12 +199,51 @@ describe("HarmonyChat candidate controls", () => {
       />,
     );
 
-    expect(markup).toContain(
-      "Selection committed. You can preview these options again.",
-    );
+    expect(markup).not.toContain("Selection committed");
     expect(markup).not.toContain(">Select</button>");
     expect(markup).not.toContain(">Cancel</button>");
     expect(markup).not.toContain(' disabled=""');
+  });
+
+  it("removes legacy structured-card headings", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "progression",
+        kind: "progression",
+        heading: "Generated in C",
+        items: candidateMessage.candidates[0].items,
+      },
+      {
+        id: "explanation",
+        kind: "explanation",
+        overview: "The cadence resolves to C.",
+        measures: [],
+      },
+    ];
+    const markup = renderToStaticMarkup(
+      <HarmonyChat
+        candidatePreview={null}
+        composerValue=""
+        error={null}
+        hasProgression
+        helperText="Helper"
+        isExplaining={false}
+        isGenerating={false}
+        messages={messages}
+        onCancelCandidate={noOp}
+        onComposerChange={noOp}
+        onExplainCandidate={noOp}
+        onPreviewCandidate={noOp}
+        onSelectCandidate={noOp}
+        onSubmit={noOp}
+        placeholder="Describe harmony"
+      />,
+    );
+
+    expect(markup).toContain("Generated in C");
+    expect(markup).toContain("The cadence resolves to C.");
+    expect(markup).not.toContain("Progression snapshot");
+    expect(markup).not.toContain("In plain English");
   });
 
   it("disables old options while a newer preview transaction is open", () => {

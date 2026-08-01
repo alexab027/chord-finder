@@ -83,6 +83,7 @@ describe("candidate explanation facts", () => {
     expect(measureAnswer?.measures[0].explanation).toContain(
       "explicitly requested",
     );
+    expect(measureAnswer?.overview).toBe("");
     expect(transitionAnswer?.overview).toContain("dominant-to-tonic");
   });
 

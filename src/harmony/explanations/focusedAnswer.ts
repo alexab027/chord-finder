@@ -100,7 +100,7 @@ export function answerFocusedHarmonyQuestion({
     `${chordFact.symbol} is ${chordFact.romanNumeral} in ${facts.activeKey}.`;
 
   return {
-    overview: `Measure ${measure} is grounded in the current progression facts.`,
+    overview: "",
     measures: [{ measure, chord: chordFact.symbol, explanation }],
   };
 }

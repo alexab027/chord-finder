@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type {
   CandidateMode,
   CandidateRole,
@@ -57,16 +57,23 @@ type HarmonyChatProps = {
   onCancelCandidate: (candidateSetId: string) => void;
 };
 
-const REVISION_CANDIDATE_ROLE_LABELS: Record<CandidateRole, string> = {
-  closest: "Closest",
-  moderate: "More Different",
-  distinct: "Fresh Alternative",
-};
-
-function getCandidateRoleLabel(mode: CandidateMode, role: CandidateRole) {
-  if (mode === "generate_new" && role === "closest") return "Best Fit";
-  return REVISION_CANDIDATE_ROLE_LABELS[role];
+export function getComposerSubmissionBlock({
+  isGenerating,
+  isPreviewingCandidates,
+}: {
+  isGenerating: boolean;
+  isPreviewingCandidates: boolean;
+}) {
+  if (isGenerating) return "busy" as const;
+  if (isPreviewingCandidates) return "choose_candidate" as const;
+  return null;
 }
+
+const CANDIDATE_ROLE_LABELS: Record<CandidateRole, string> = {
+  closest: "Best Fit",
+  moderate: "Alternate Best Fit",
+  distinct: "Unique Fit",
+};
 
 function TextMessage({
   role,
@@ -110,15 +117,8 @@ function ProgressionMessage({
 }) {
   return (
     <article className="space-y-3 bg-[var(--surface)] px-4 py-4">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-        Harmony
-      </div>
-
       <div className="border-l-2 border-[var(--accent)] pl-3">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-          Progression snapshot
-        </div>
-        <div className="mt-1 font-semibold text-[var(--text)]">{heading}</div>
+        <div className="font-semibold text-[var(--text)]">{heading}</div>
         <dl className="mt-2 grid gap-1 text-sm text-[var(--text-muted)]">
           <div className="flex flex-wrap gap-x-2">
             <dt className="font-medium text-[var(--text)]">Chords</dt>
@@ -143,11 +143,7 @@ function ExplanationMessage({
 }) {
   return (
     <article className="space-y-3 bg-[var(--surface)] px-4 py-4">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-        Harmony
-      </div>
       <div className="space-y-2 text-sm">
-        <div className="font-semibold text-[var(--text)]">In plain English</div>
         {overview && <p className="text-[var(--text-muted)]">{overview}</p>}
         {measures.length > 0 && (
           <ul className="space-y-1 text-[var(--text-muted)]">
@@ -168,7 +164,6 @@ function ExplanationMessage({
 
 function CandidateMessage({
   candidateSetId,
-  mode,
   candidates,
   candidatePreview,
   onPreviewCandidate,
@@ -177,7 +172,6 @@ function CandidateMessage({
   onCancelCandidate,
 }: {
   candidateSetId: string;
-  mode: CandidateMode;
   candidates: Extract<ChatMessage, { kind: "candidates" }>["candidates"];
   candidatePreview: CandidatePreviewSummary | null;
   onPreviewCandidate: (candidateSetId: string, candidateId: string) => void;
@@ -192,22 +186,12 @@ function CandidateMessage({
 
   return (
     <article className="space-y-3 bg-[var(--surface)] px-4 py-4">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-        Harmony
-      </div>
-      <div>
-        <div className="font-semibold text-[var(--text)]">
-          Choose a progression
-        </div>
-        <p className="mt-1 text-xs text-[var(--text-muted)]">
-          {isPreviewing
-            ? "Preview each option on the staff, then select one or cancel."
-            : "Choose an option to open a fresh preview from your current progression."}
-        </p>
+      <div className="font-semibold text-[var(--text)]">
+        Choose a progression
       </div>
 
       <div className="grid gap-2">
-        {candidates.map((candidate, index) => {
+        {candidates.map((candidate) => {
           const isPreviewed =
             isCurrentSet &&
             candidatePreview.previewedCandidateId === candidate.id;
@@ -228,7 +212,7 @@ function CandidateMessage({
               type="button"
             >
               <span className="block text-sm font-semibold text-[var(--text)]">
-                Option {index + 1} — {getCandidateRoleLabel(mode, candidate.role)}
+                {CANDIDATE_ROLE_LABELS[candidate.role]}
               </span>
               <span className="mt-1 block text-sm text-[var(--text-muted)]">
                 {candidate.items
@@ -264,13 +248,7 @@ function CandidateMessage({
             Cancel
           </button>
         </div>
-      ) : (
-        <p className="text-xs font-medium text-[var(--text-muted)]">
-          {isCurrentSet && candidatePreview.status === "selected"
-            ? "Selection committed. You can preview these options again."
-            : "Preview closed. You can preview these options again."}
-        </p>
-      )}
+      ) : null}
     </article>
   );
 }
@@ -304,7 +282,6 @@ function ChatEntry({
         candidatePreview={candidatePreview}
         candidates={message.candidates}
         candidateSetId={message.candidateSetId}
-        mode={message.mode}
         onCancelCandidate={onCancelCandidate}
         onPreviewCandidate={onPreviewCandidate}
         onSelectCandidate={onSelectCandidate}
@@ -327,7 +304,6 @@ export default function HarmonyChat({
   helperText,
   isGenerating,
   isExplaining,
-  hasProgression,
   candidatePreview,
   error,
   onComposerChange,
@@ -338,18 +314,30 @@ export default function HarmonyChat({
   onCancelCandidate,
 }: HarmonyChatProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
-  const submitLabel = isGenerating
-    ? hasProgression
-      ? "Updating…"
-      : "Generating…"
-    : hasProgression
-      ? "Update progression"
-      : "Generate progression";
+  const [blockedCandidateSetId, setBlockedCandidateSetId] = useState<
+    string | null
+  >(null);
   const isPreviewingCandidates = candidatePreview?.status === "previewing";
+  const previewSubmitWarning =
+    isPreviewingCandidates && blockedCandidateSetId === candidatePreview?.id;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isExplaining]);
+
+  function attemptSubmit() {
+    const block = getComposerSubmissionBlock({
+      isGenerating,
+      isPreviewingCandidates,
+    });
+    if (block === "busy") return;
+    if (block === "choose_candidate") {
+      setBlockedCandidateSetId(candidatePreview?.id ?? null);
+      return;
+    }
+    setBlockedCandidateSetId(null);
+    onSubmit();
+  }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (
@@ -361,7 +349,7 @@ export default function HarmonyChat({
     }
 
     event.preventDefault();
-    if (!isGenerating && !isPreviewingCandidates) onSubmit();
+    attemptSubmit();
   }
 
   return (
@@ -395,12 +383,7 @@ export default function HarmonyChat({
             ))}
             {isExplaining && (
               <article className="bg-[var(--surface)] px-4 py-4">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                  Harmony
-                </div>
-                <p className="mt-1 text-sm text-[var(--text-muted)]">
-                  Writing a plain-English explanation…
-                </p>
+                <p className="text-sm text-[var(--text-muted)]">Explaining…</p>
               </article>
             )}
             <div ref={bottomRef} />
@@ -416,30 +399,39 @@ export default function HarmonyChat({
           <span className="text-xs leading-5 text-[var(--text-muted)]">
             {helperText}
           </span>
-          <textarea
-            className="mt-1 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
-            maxLength={500}
-            disabled={isPreviewingCandidates}
-            onChange={(event) => onComposerChange(event.target.value)}
-            onKeyDown={handleComposerKeyDown}
-            placeholder={placeholder}
-            rows={3}
-            value={composerValue}
-          />
+          <div className="relative mt-1">
+            <textarea
+              className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2 pr-14 text-sm text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
+              maxLength={500}
+              onChange={(event) => onComposerChange(event.target.value)}
+              onKeyDown={handleComposerKeyDown}
+              placeholder={placeholder}
+              rows={3}
+              value={composerValue}
+            />
+            <button
+              aria-busy={isGenerating}
+              aria-label="Send harmony request"
+              className={
+                isGenerating
+                  ? "absolute bottom-2 right-2 flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-md border border-[var(--border)] bg-[#ecece8] text-lg font-semibold text-[var(--text-muted)]"
+                  : "absolute bottom-2 right-2 flex h-9 w-9 items-center justify-center rounded-md border border-[var(--accent-border)] bg-[var(--accent)] text-lg font-semibold text-white hover:bg-[var(--accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
+              }
+              disabled={isGenerating}
+              onClick={attemptSubmit}
+              title="Send harmony request"
+              type="button"
+            >
+              {isGenerating ? "…" : "↑"}
+            </button>
+          </div>
         </label>
 
-        <button
-          className={
-            isGenerating || isPreviewingCandidates
-              ? "mt-3 h-10 cursor-not-allowed rounded-md border border-[var(--border)] bg-[#ecece8] px-4 text-sm font-semibold text-[var(--text-muted)]"
-              : "mt-3 h-10 rounded-md border border-[var(--accent-border)] bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:bg-[var(--accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
-          }
-          disabled={isGenerating || isPreviewingCandidates}
-          onClick={onSubmit}
-          type="button"
-        >
-          {isPreviewingCandidates ? "Choose an option above" : submitLabel}
-        </button>
+        {previewSubmitWarning && (
+          <p aria-live="polite" className="mt-2 text-xs text-[var(--warning)]">
+            Choose an option above.
+          </p>
+        )}
 
         {error && <p className="mt-3 text-xs text-[var(--warning)]">{error}</p>}
       </div>
