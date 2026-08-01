@@ -88,8 +88,8 @@ function TextMessage({
     <article
       className={
         isUser
-          ? "ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-[var(--surface-subtle)] px-4 py-3"
-          : "mr-auto max-w-[85%] rounded-2xl rounded-bl-md bg-[var(--surface)] px-4 py-3"
+          ? "ml-auto max-w-[75%] rounded-2xl rounded-br-md bg-[color-mix(in_srgb,var(--accent)_9%,white)] px-4 py-3"
+          : "mr-auto max-w-[75%] rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3"
       }
     >
       <p
@@ -113,7 +113,7 @@ function ProgressionMessage({
   items: CurrentProgressionItem[];
 }) {
   return (
-    <article className="mr-auto w-full max-w-[90%] space-y-3 rounded-2xl rounded-bl-md bg-[var(--surface)] px-4 py-4">
+    <article className="mr-auto w-full max-w-[75%] space-y-3 rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-4">
       <div className="border-l-2 border-[var(--accent)] pl-3">
         <div className="font-semibold text-[var(--text)]">{heading}</div>
         <dl className="mt-2 grid gap-1 text-sm text-[var(--text-muted)]">
@@ -139,7 +139,7 @@ function ExplanationMessage({
   measures: Array<{ measure: number; chord: string; explanation: string }>;
 }) {
   return (
-    <article className="mr-auto w-full max-w-[90%] space-y-3 rounded-2xl rounded-bl-md bg-[var(--surface)] px-4 py-4">
+    <article className="mr-auto w-full max-w-[75%] space-y-3 rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-4">
       <div className="space-y-2 text-sm">
         {overview && <p className="text-[var(--text-muted)]">{overview}</p>}
         {measures.length > 0 && (
@@ -182,12 +182,12 @@ function CandidateMessage({
     candidatePreview?.status === "previewing" && !isCurrentSet;
 
   return (
-    <article className="mr-auto w-full max-w-[90%] space-y-3 rounded-2xl rounded-bl-md bg-[var(--surface)] px-4 py-4">
+    <article className="mr-auto w-full max-w-[75%] space-y-3 rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-4">
       <div className="font-semibold text-[var(--text)]">
         Choose a progression
       </div>
 
-      <div className="grid gap-2">
+      <div className="flex gap-2 overflow-x-auto pb-1">
         {candidates.map((candidate) => {
           const isPreviewed =
             isCurrentSet &&
@@ -198,8 +198,8 @@ function CandidateMessage({
               aria-pressed={isPreviewed}
               className={
                 isPreviewed
-                  ? "rounded-md border border-[var(--accent-border)] bg-[color-mix(in_srgb,var(--accent)_10%,white)] px-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
-                  : "rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-3 text-left hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                  ? "w-80 shrink-0 rounded-md border border-[var(--accent-border)] bg-[color-mix(in_srgb,var(--accent)_10%,white)] px-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
+                  : "w-80 shrink-0 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-3 text-left hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
               }
               disabled={anotherSetIsPreviewing}
               key={candidate.id}
@@ -211,7 +211,7 @@ function CandidateMessage({
               <span className="block text-sm font-semibold text-[var(--text)]">
                 {CANDIDATE_ROLE_LABELS[candidate.role]}
               </span>
-              <span className="mt-1 block text-sm text-[var(--text-muted)]">
+              <span className="mt-1 block whitespace-nowrap text-sm text-[var(--text-muted)]">
                 {candidate.items
                   .map((item) => item.absoluteSymbol)
                   .join(" – ")}
@@ -380,7 +380,7 @@ export default function HarmonyChat({
               />
             ))}
             {isExplaining && (
-              <article className="mr-auto max-w-[85%] rounded-2xl rounded-bl-md bg-[var(--surface)] px-4 py-3">
+              <article className="mr-auto max-w-[75%] rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3">
                 <p className="text-sm text-[var(--text-muted)]">Explaining…</p>
               </article>
             )}

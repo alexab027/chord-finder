@@ -275,8 +275,8 @@ describe("HarmonyChat candidate controls", () => {
       />,
     );
 
-    expect(markup).toContain("ml-auto max-w-[85%]");
-    expect(markup).toContain("mr-auto max-w-[85%]");
+    expect(markup).toContain("ml-auto max-w-[75%]");
+    expect(markup).toContain("mr-auto max-w-[75%]");
     expect(markup).not.toContain(">You<");
     expect(markup).not.toContain(">Harmony<");
     expect(markup).not.toContain("Harmony conversation");
@@ -284,6 +284,36 @@ describe("HarmonyChat candidate controls", () => {
     expect(markup).toContain("resize-none");
     expect(markup).toContain("h-8 w-8");
     expect(markup).toContain("rounded-full");
+  });
+
+  it("lays candidate cards out in a fixed-width horizontal row", () => {
+    const markup = renderToStaticMarkup(
+      <HarmonyChat
+        candidatePreview={{
+          id: "candidate-set-1",
+          previewedCandidateId: "candidate-1",
+          status: "previewing",
+        }}
+        composerValue=""
+        error={null}
+        hasProgression
+        helperText="Helper"
+        isExplaining={false}
+        isGenerating={false}
+        messages={[candidateMessage]}
+        onCancelCandidate={noOp}
+        onComposerChange={noOp}
+        onExplainCandidate={noOp}
+        onPreviewCandidate={noOp}
+        onSelectCandidate={noOp}
+        onSubmit={noOp}
+        placeholder="Describe harmony"
+      />,
+    );
+
+    expect(markup).toContain("flex gap-2 overflow-x-auto");
+    expect(markup.match(/w-80 shrink-0/g)).toHaveLength(3);
+    expect(markup).toContain("whitespace-nowrap");
   });
 
   it("disables old options while a newer preview transaction is open", () => {
