@@ -1,12 +1,27 @@
-import { getKeySignatureExtraWidth } from "../../music/noteUtils";
+import {
+  getKeySignatureExtraWidth,
+  KEY_SIGNATURE_ACCIDENTALS,
+} from "../../music/noteUtils";
 
-export const STAFF_X = 20;
-export const MELODY_STAFF_Y = 40;
-export const CHORD_STAFF_Y = 190;
-export const BASE_MEASURE_WIDTH = 300;
-export const BASE_FIRST_MEASURE_EXTRA = 90;
+export const STAFF_X = 16;
+export const MELODY_STAFF_Y = 34;
+export const CHORD_STAFF_Y = 165;
+export const BASE_MEASURE_WIDTH = 270;
+export const BASE_FIRST_MEASURE_EXTRA = 82;
 export const MEASURE_COUNT = 4;
-export const RENDERER_HEIGHT = 310;
+export const RENDERER_HEIGHT = 280;
+export const MAX_KEY_SIGNATURE_EXTRA_WIDTH = Math.max(
+  ...Object.keys(KEY_SIGNATURE_ACCIDENTALS).map(getKeySignatureExtraWidth),
+);
+export const MAX_STAFF_RENDERER_WIDTH =
+  STAFF_X * 2 +
+  BASE_MEASURE_WIDTH * MEASURE_COUNT +
+  BASE_FIRST_MEASURE_EXTRA +
+  MAX_KEY_SIGNATURE_EXTRA_WIDTH;
+export const STAFF_FRAME_WIDTH = MAX_STAFF_RENDERER_WIDTH + 18;
+export const PLAYBACK_PANEL_WIDTH = 144;
+export const EDITOR_PANEL_WIDTH =
+  STAFF_FRAME_WIDTH + PLAYBACK_PANEL_WIDTH - 1;
 export type StaffGeometry = ReturnType<typeof getStaffGeometry>;
 
 export function getStaffGeometry(keySignature: string) {

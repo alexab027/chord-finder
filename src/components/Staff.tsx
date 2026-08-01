@@ -8,6 +8,8 @@ import { DURATION_TO_SLOTS } from "../music/noteUtils";
 import {
   getStaffGeometry,
   getMeasureInfoFromClick,
+  EDITOR_PANEL_WIDTH,
+  STAFF_FRAME_WIDTH,
 } from "./chord-finder/staffGeometry";
 import { voiceProgression } from "../music/voicing";
 import {
@@ -75,6 +77,7 @@ import {
   type CurrentProgressionItem,
 } from "../music/progressionPresentation";
 import HarmonyToolbar from "./chord-finder/HarmonyToolbar";
+import HarmonyPlaybackPanel from "./chord-finder/HarmonyPlaybackPanel";
 import HarmonyChat from "./chord-finder/HarmonyChat";
 import { renderPitch, yToPitch } from "./chord-finder/pitchSpelling";
 import StaffRenderer from "./chord-finder/StaffRenderer";
@@ -1049,21 +1052,16 @@ export default function Staff() {
   return (
     <div className="space-y-8">
       {/* Section 1: melody + chord staves and all note-entry controls */}
-      <section className="space-y-4">
+      <section className="max-w-full" style={{ width: EDITOR_PANEL_WIDTH }}>
         <HarmonyToolbar
-          bpm={bpm}
           generationMode={generationMode}
-          hasChords={hasProgression}
           hasNotes={hasNotes}
           keySignature={keySignature}
           onAccidentalClick={handleAccidentalClick}
-          onBpmChange={setBpm}
-          onClearChords={clearChords}
           onClearMelody={clearAllMeasures}
           onDeleteLast={deleteLastNote}
           onGenerationModeChange={handleGenerationModeChange}
           onKeySignatureChange={handleKeySignatureChange}
-          onPlay={playMeasures}
           onSelectNote={(duration) => {
             setSelectedKind("note");
             setSelectedDuration(duration);
@@ -1079,46 +1077,68 @@ export default function Staff() {
         />
 
         {/* Staff */}
-        <div className="overflow-x-auto border-y border-[var(--border)] bg-[var(--surface)]">
+        <div className="flex w-fit max-w-full items-stretch">
           <div
-            ref={staffWrapperRef}
-            onClick={handleStaffClick}
-            className="cursor-crosshair"
-            style={{
-              width: rendererWidth,
-              height: rendererHeight,
-              position: "relative",
-            }}
+            className="min-w-0 shrink overflow-x-auto border border-[var(--border)] bg-[var(--surface)] p-2"
+            style={{ width: STAFF_FRAME_WIDTH }}
           >
-            <StaffRenderer
-              bottomStaffLineYRef={bottomStaffLineYRef}
-              chordMeasures={chordMeasures}
-              geometry={geometry}
-              keySignature={keySignature}
-              measures={measures}
-              topStaffLineYRef={topStaffLineYRef}
-            />
+            <div
+              ref={staffWrapperRef}
+              onClick={handleStaffClick}
+              className="cursor-crosshair"
+              style={{
+                width: rendererWidth,
+                height: rendererHeight,
+                position: "relative",
+              }}
+            >
+              <StaffRenderer
+                bottomStaffLineYRef={bottomStaffLineYRef}
+                chordMeasures={chordMeasures}
+                geometry={geometry}
+                keySignature={keySignature}
+                measures={measures}
+                topStaffLineYRef={topStaffLineYRef}
+              />
+            </div>
           </div>
+          <HarmonyPlaybackPanel
+            bpm={bpm}
+            hasChords={hasProgression}
+            onBpmChange={setBpm}
+            onClearChords={clearChords}
+            onPlay={playMeasures}
+          />
         </div>
       </section>
 
-      <HarmonyChat
-        candidatePreview={candidateSet}
-        composerValue={stylePrompt}
-        error={aiError}
-        hasProgression={hasCommittedProgression}
-        helperText={PROMPT_HELPER_TEXT}
-        isExplaining={isExplaining}
-        isGenerating={isGenerating}
-        messages={messages}
-        onCancelCandidate={handleCandidateCancellation}
-        onComposerChange={setStylePrompt}
-        onPreviewCandidate={handlePreviewCandidate}
-        onSelectCandidate={handleCandidateSelection}
-        onExplainCandidate={handleExplainCandidate}
-        onSubmit={handleGenerateProgression}
-        placeholder={hasProgression ? REVISION_PLACEHOLDER : FRESH_PLACEHOLDER}
-      />
+      <section
+        className="max-w-full border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
+        style={{ width: EDITOR_PANEL_WIDTH }}
+      >
+        <h2 className="mb-2 pl-2 text-sm font-semibold tracking-[-0.01em] text-[var(--text)]">
+          Chord Chat
+        </h2>
+        <HarmonyChat
+          candidatePreview={candidateSet}
+          composerValue={stylePrompt}
+          error={aiError}
+          hasProgression={hasCommittedProgression}
+          helperText={PROMPT_HELPER_TEXT}
+          isExplaining={isExplaining}
+          isGenerating={isGenerating}
+          messages={messages}
+          onCancelCandidate={handleCandidateCancellation}
+          onComposerChange={setStylePrompt}
+          onPreviewCandidate={handlePreviewCandidate}
+          onSelectCandidate={handleCandidateSelection}
+          onExplainCandidate={handleExplainCandidate}
+          onSubmit={handleGenerateProgression}
+          placeholder={
+            hasProgression ? REVISION_PLACEHOLDER : FRESH_PLACEHOLDER
+          }
+        />
+      </section>
     </div>
   );
 }
