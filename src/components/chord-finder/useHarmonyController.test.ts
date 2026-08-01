@@ -4,7 +4,15 @@ import { toGenerationPreferences } from "../../ai/toGenerationPreferences";
 import { buildCandidatePool } from "../../harmony/candidates/buildCandidatePool";
 import { candidateHash } from "../../harmony/candidates/candidateHash";
 import type { CandidateSet } from "../../harmony/candidates/types";
-import { progressionComplexity } from "../../harmony/transforms/styleTransforms";
+import {
+  jazzColorScore,
+  progressionComplexity,
+} from "../../harmony/transforms/styleTransforms";
+import {
+  evaluateStyleBoundary,
+  getStyleBoundaryNotice,
+  styleConstraintForBoundary,
+} from "../../harmony/styleBoundary";
 import { buildNamedChord } from "../../music/chords";
 import { rankProgressions } from "../../music/chordGeneration";
 import type {
@@ -15,7 +23,7 @@ import type {
   ScoredChord,
 } from "../../music/types";
 import {
-  getStyleBoundaryNotice,
+  prepareVisibleCandidateResult,
   prepareReopenedCandidateSet,
   prepareVisibleCandidates,
 } from "./useHarmonyController";
@@ -257,6 +265,110 @@ describe("prepareVisibleCandidates", () => {
       ),
     ).toBe(true);
   });
+
+  it("blocks an equal-metric directional preview", () => {
+    const base = outsideGrammarBase();
+    const preferences = {
+      ...toGenerationPreferences(DEFAULT_INTERPRETED_STYLE),
+      style: "jazzy" as const,
+      styleTransform: "jazzy" as const,
+      jazzLevel: 3 as const,
+    };
+    const result = prepareVisibleCandidateResult({
+      mode: "revise_existing",
+      key: aMinor,
+      measures: emptyMeasures,
+      getRenderedPitchFn: noPitch,
+      style: "jazzy",
+      preferences,
+      revision: revisionContext(base),
+      currentProgression: base,
+      directionalStyleChange: "jazzy",
+      voiceProgressionFn: visibleVoicing,
+    });
+
+    expect(result.candidates).toEqual([]);
+    expect(result.styleBoundary).toMatchObject({
+      baseMetric: 8,
+      improved: false,
+      atAbsoluteBoundary: true,
+    });
+  });
+
+  it("keeps only genuine directional improvements", () => {
+    const base = ["Am", "Dm", "E", "Am"].map((symbol) => ({
+      chord: buildNamedChord(aMinor, symbol)!,
+      score: 0,
+      reasons: [],
+    }));
+    const preferences = {
+      ...toGenerationPreferences(DEFAULT_INTERPRETED_STYLE),
+      style: "jazzy" as const,
+      styleTransform: "jazzy" as const,
+      jazzLevel: 3 as const,
+    };
+    const result = prepareVisibleCandidateResult({
+      mode: "revise_existing",
+      key: aMinor,
+      measures: emptyMeasures,
+      getRenderedPitchFn: noPitch,
+      style: "jazzy",
+      preferences,
+      revision: revisionContext(base),
+      currentProgression: base,
+      directionalStyleChange: "jazzy",
+      voiceProgressionFn: visibleVoicing,
+    });
+
+    expect(result.styleBoundary?.improved).toBe(true);
+    expect(result.candidates.length).toBeGreaterThan(0);
+    expect(
+      result.candidates.every(
+        ({ progression }) =>
+          jazzColorScore(progression) > jazzColorScore(base),
+      ),
+    ).toBe(true);
+  });
+
+  it("finds changed alternatives without dropping below the stored style level", () => {
+    const base = outsideGrammarBase();
+    const preferences = {
+      ...toGenerationPreferences(DEFAULT_INTERPRETED_STYLE),
+      style: "jazzy" as const,
+      jazzLevel: 3 as const,
+      complexity: 1,
+      preferSevenths: true,
+    };
+    const result = prepareVisibleCandidateResult({
+      mode: "revise_existing",
+      key: aMinor,
+      measures: emptyMeasures,
+      getRenderedPitchFn: noPitch,
+      style: "jazzy",
+      preferences,
+      revision: { ...revisionContext(base), changeAmount: 1 },
+      currentProgression: base,
+      seenHashes: [candidateHash(base)],
+      excludeSeenHashes: true,
+      styleConstraint: styleConstraintForBoundary({
+        direction: "jazzy",
+        metric: 8,
+        progressionId: candidateHash(base),
+        originalRequest: "make it jazzier",
+      }),
+      voiceProgressionFn: visibleVoicing,
+    });
+
+    expect(result.candidates.length).toBeGreaterThan(0);
+    expect(
+      result.candidates.every(
+        ({ progression, symbolicHash, distanceFromBase }) =>
+          jazzColorScore(progression) >= 8 &&
+          symbolicHash !== candidateHash(base) &&
+          (distanceFromBase ?? 0) > 0,
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("prepareReopenedCandidateSet", () => {
@@ -310,14 +422,18 @@ describe("prepareReopenedCandidateSet", () => {
 
 describe("getStyleBoundaryNotice", () => {
   it("recognizes the absolute four-measure jazz-color ceiling", () => {
-    const notice = getStyleBoundaryNotice("jazzy", outsideGrammarBase());
+    const boundary = evaluateStyleBoundary({
+      currentProgression: outsideGrammarBase(),
+      candidates: [],
+      direction: "jazzy",
+    });
+    const notice = getStyleBoundaryNotice(boundary);
 
-    expect(notice).toMatchObject({
-      currentMetric: 8,
-      absoluteBoundary: 8,
+    expect(boundary).toMatchObject({
+      baseMetric: 8,
       atAbsoluteBoundary: true,
     });
-    expect(notice.message).toContain("already very jazzy");
-    expect(notice.message).toContain("different options");
+    expect(notice).toContain("already very jazzy");
+    expect(notice).toContain("different options");
   });
 });

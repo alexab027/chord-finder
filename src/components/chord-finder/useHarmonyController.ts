@@ -13,6 +13,15 @@ import type {
 import { validateCandidatePool } from "../../harmony/candidates/validateCandidate";
 import { buildCandidateExplanationFacts } from "../../harmony/explanations/facts";
 import {
+  evaluateStyleBoundary,
+  isStyleImprovement,
+  satisfiesStyleConstraint,
+  type CandidateStyleConstraint,
+  type PendingStyleAlternative,
+  type StyleBoundaryResult,
+  type StyleDirection,
+} from "../../harmony/styleBoundary";
+import {
   jazzColorScore,
   progressionComplexity,
 } from "../../harmony/transforms/styleTransforms";
@@ -104,11 +113,19 @@ export type PrepareVisibleCandidatesInput = {
   currentProgression: readonly ScoredChord[] | null;
   exactActions?: readonly ChordEditAction[];
   seenHashes?: readonly string[];
+  excludeSeenHashes?: boolean;
+  styleConstraint?: CandidateStyleConstraint;
+  directionalStyleChange?: StyleDirection;
   voiceProgressionFn?: VoiceProgressionFn;
   requestSummary?: string;
 };
 
-export function prepareVisibleCandidates({
+export type PrepareVisibleCandidateResult = {
+  candidates: ProgressionCandidate[];
+  styleBoundary: StyleBoundaryResult | null;
+};
+
+export function prepareVisibleCandidateResult({
   mode,
   key,
   measures,
@@ -119,9 +136,12 @@ export function prepareVisibleCandidates({
   currentProgression,
   exactActions = [],
   seenHashes = [],
+  excludeSeenHashes = false,
+  styleConstraint,
+  directionalStyleChange,
   voiceProgressionFn = voiceProgression,
   requestSummary = "Generate the best-fitting progression.",
-}: PrepareVisibleCandidatesInput): ProgressionCandidate[] {
+}: PrepareVisibleCandidatesInput): PrepareVisibleCandidateResult {
   const pool = buildCandidatePool({
     mode,
     key,
@@ -150,22 +170,44 @@ export function prepareVisibleCandidates({
         };
       })
       .filter(
-        ({ symbolicHash }) =>
-          mode !== "generate_new" || !seen.has(symbolicHash),
+        ({ progression, symbolicHash }) =>
+          (!(mode === "generate_new" || excludeSeenHashes) ||
+            !seen.has(symbolicHash)) &&
+          (!styleConstraint ||
+            satisfiesStyleConstraint(progression, styleConstraint)),
       ),
   ).candidates;
+  const poolStyleBoundary =
+    directionalStyleChange && currentProgression
+      ? evaluateStyleBoundary({
+          currentProgression,
+          candidates: constrainedPool.map(({ progression }) => progression),
+          direction: directionalStyleChange,
+        })
+      : null;
+  const directionallyValidPool = poolStyleBoundary
+    ? poolStyleBoundary.improved
+      ? constrainedPool.filter(({ progression }) =>
+          isStyleImprovement(
+            progression,
+            poolStyleBoundary.baseMetric,
+            poolStyleBoundary.direction,
+          ),
+        )
+      : []
+    : constrainedPool;
   const selected =
     mode === "generate_new"
       ? selectCandidateRoles({
           mode,
-          candidates: constrainedPool,
+          candidates: directionallyValidPool,
           currentProgression,
           excludeCurrentProgression: Boolean(currentProgression),
         })
       : currentProgression
         ? selectCandidateRoles({
             mode,
-            candidates: constrainedPool,
+            candidates: directionallyValidPool,
             baseProgression: currentProgression,
           })
         : [];
@@ -203,9 +245,25 @@ export function prepareVisibleCandidates({
     },
   );
 
-  return validateCandidatePool(voicedCandidates, {
+  const candidates = validateCandidatePool(voicedCandidates, {
     requireVoicing: true,
   }).candidates;
+  const styleBoundary =
+    directionalStyleChange && currentProgression
+      ? evaluateStyleBoundary({
+          currentProgression,
+          candidates: candidates.map(({ progression }) => progression),
+          direction: directionalStyleChange,
+        })
+      : null;
+
+  return { candidates, styleBoundary };
+}
+
+export function prepareVisibleCandidates(
+  input: PrepareVisibleCandidatesInput,
+): ProgressionCandidate[] {
+  return prepareVisibleCandidateResult(input).candidates;
 }
 
 type UseHarmonyControllerOptions = {
@@ -222,35 +280,11 @@ type UseHarmonyControllerOptions = {
   setError: (message: string | null) => void;
   pushAssistantMessage: (message: string) => void;
   resolvePendingClarification: () => void;
+  onStyleBoundary: (event: {
+    boundary: StyleBoundaryResult;
+    pending: PendingStyleAlternative;
+  }) => void;
 };
-
-export function getStyleBoundaryNotice(
-  direction: "jazzy" | "simple",
-  progression: readonly ScoredChord[],
-) {
-  const currentMetric =
-    direction === "jazzy"
-      ? jazzColorScore(progression)
-      : progressionComplexity(progression);
-  const absoluteBoundary =
-    direction === "jazzy" ? progression.length * 2 : 0;
-  const atAbsoluteBoundary =
-    direction === "jazzy"
-      ? currentMetric >= absoluteBoundary
-      : currentMetric <= absoluteBoundary;
-  const adjective = direction === "jazzy" ? "jazzier" : "simpler";
-  const currentDescription =
-    direction === "jazzy" ? "already very jazzy" : "already very simple";
-
-  return {
-    currentMetric,
-    absoluteBoundary,
-    atAbsoluteBoundary,
-    message: atAbsoluteBoundary
-      ? `The current progression is ${currentDescription} and has reached the available ${direction === "jazzy" ? "jazziness" : "simplicity"} limit. Would you like structurally different options at about the same level instead? You can say “show different options at the same ${direction === "jazzy" ? "jazziness" : "simplicity"}.”`
-      : `I couldn't find a valid progression that is ${adjective} without breaking the current musical constraints. Would you like structurally different options at about the same level instead? You can say “show different options at the same ${direction === "jazzy" ? "jazziness" : "simplicity"}.”`,
-  };
-}
 
 type OpenCreativePreviewInput = Omit<
   PrepareVisibleCandidatesInput,
@@ -259,6 +293,7 @@ type OpenCreativePreviewInput = Omit<
   resultInterpretation: InterpretedStyle;
   commitLabel: "Generated" | "Updated";
   requestSummary: string;
+  emptyCandidateMessage?: string;
 };
 
 export function useHarmonyController({
@@ -267,6 +302,7 @@ export function useHarmonyController({
   setError,
   pushAssistantMessage,
   resolvePendingClarification,
+  onStyleBoundary,
 }: UseHarmonyControllerOptions) {
   const [aiInterpretation, setAiInterpretation] =
     useState<InterpretedStyle | null>(null);
@@ -334,10 +370,14 @@ export function useHarmonyController({
     commitLabel,
     exactActions,
     requestSummary,
+    excludeSeenHashes,
+    styleConstraint,
+    directionalStyleChange,
+    emptyCandidateMessage,
   }: OpenCreativePreviewInput) {
-    let candidates: ProgressionCandidate[];
+    let prepared: PrepareVisibleCandidateResult;
     try {
-      candidates = prepareVisibleCandidates({
+      prepared = prepareVisibleCandidateResult({
         mode,
         key,
         measures,
@@ -348,6 +388,9 @@ export function useHarmonyController({
         exactActions,
         requestSummary,
         seenHashes: history.seenHashes,
+        excludeSeenHashes,
+        styleConstraint,
+        directionalStyleChange,
         currentProgression: lastProgressionRef.current,
       });
     } catch (error) {
@@ -363,6 +406,24 @@ export function useHarmonyController({
       );
       return null;
     }
+    const { candidates, styleBoundary } = prepared;
+    const baseProgression = lastProgressionRef.current;
+    if (styleBoundary && !styleBoundary.improved && baseProgression) {
+      const pending: PendingStyleAlternative = {
+        direction: styleBoundary.direction,
+        metric: styleBoundary.baseMetric,
+        progressionId: candidateHash(baseProgression),
+        originalRequest: requestSummary,
+      };
+      harmonyDebug("style_boundary_reached", {
+        ...styleBoundary,
+        progressionId: pending.progressionId,
+        candidateCount: candidates.length,
+      });
+      onStyleBoundary({ boundary: styleBoundary, pending });
+      setError(null);
+      return null;
+    }
     if (candidates.length === 0) {
       harmonyDebug("candidate_preparation_empty", {
         mode,
@@ -370,18 +431,8 @@ export function useHarmonyController({
         seenProgressionCount: history.seenHashes.length,
         exactActionCount: exactActions?.length ?? 0,
       });
-      const styleDirection = preferences.styleTransform;
-      const baseProgression = lastProgressionRef.current;
-      if (styleDirection && baseProgression) {
-        const notice = getStyleBoundaryNotice(
-          styleDirection,
-          baseProgression,
-        );
-        harmonyDebug("style_boundary_reached", {
-          direction: styleDirection,
-          ...notice,
-        });
-        pushAssistantMessage(notice.message);
+      if (emptyCandidateMessage) {
+        pushAssistantMessage(emptyCandidateMessage);
         setError(null);
         return null;
       }
@@ -389,7 +440,6 @@ export function useHarmonyController({
       return null;
     }
 
-    const baseProgression = lastProgressionRef.current;
     const candidateMetrics = candidates.map((candidate) => ({
       role: candidate.role,
       progressionId: candidate.symbolicHash,
@@ -397,28 +447,6 @@ export function useHarmonyController({
       jazzColor: jazzColorScore(candidate.progression),
     }));
     const styleDirection = preferences.styleTransform;
-    const baseMetric = baseProgression
-      ? styleDirection === "jazzy"
-        ? jazzColorScore(baseProgression)
-        : styleDirection === "simple"
-          ? progressionComplexity(baseProgression)
-          : undefined
-      : undefined;
-    const candidateStyleMetrics = candidateMetrics.map((metric) =>
-      styleDirection === "jazzy" ? metric.jazzColor : metric.complexity,
-    );
-    const bestStyleMetric =
-      styleDirection === "jazzy"
-        ? Math.max(...candidateStyleMetrics)
-        : styleDirection === "simple"
-          ? Math.min(...candidateStyleMetrics)
-          : undefined;
-    const reachedStyleBoundary =
-      baseMetric !== undefined &&
-      bestStyleMetric !== undefined &&
-      (styleDirection === "jazzy"
-        ? bestStyleMetric <= baseMetric
-        : bestStyleMetric >= baseMetric);
 
     harmonyDebug("candidate_set_prepared", {
       mode,
@@ -434,9 +462,9 @@ export function useHarmonyController({
       baseProgressionId: baseProgression
         ? candidateHash(baseProgression)
         : null,
-      baseStyleMetric: baseMetric ?? null,
-      bestCandidateStyleMetric: bestStyleMetric ?? null,
-      reachedStyleBoundary,
+      baseStyleMetric: styleBoundary?.baseMetric ?? null,
+      bestCandidateStyleMetric: styleBoundary?.bestCandidateMetric ?? null,
+      reachedStyleBoundary: false,
       exactActions: exactActions ?? [],
       seenProgressionCount: history.seenHashes.length,
       candidateCount: candidates.length,

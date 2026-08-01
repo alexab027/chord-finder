@@ -32,7 +32,14 @@ import {
 import {
   asksForExplicitDescendingBass,
   getRelativeStyleChange,
+  getStyleAlternativeReply,
+  isSupportedFocusedHarmonyQuestion,
 } from "../harmony/requestLanguage";
+import {
+  buildStyleAlternativeSearch,
+  getStyleBoundaryNotice,
+  type PendingStyleAlternative,
+} from "../harmony/styleBoundary";
 import {
   resolveCreativeRevisionPreferences,
 } from "../harmony/preferences";
@@ -112,6 +119,8 @@ export default function Staff() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [pendingClarification, setPendingClarification] =
     useState<PendingClarification | null>(null);
+  const [pendingStyleAlternative, setPendingStyleAlternative] =
+    useState<PendingStyleAlternative | null>(null);
   // The persistent harmony conversation: user prompts, assistant answers, and
   // progression cards, in order. Append-only so the chat reads naturally.
   const {
@@ -140,6 +149,10 @@ export default function Staff() {
     pushAssistantMessage,
     setError: setAiError,
     resolvePendingClarification: () => setPendingClarification(null),
+    onStyleBoundary: ({ boundary, pending }) => {
+      setPendingStyleAlternative(pending);
+      pushAssistantMessage(getStyleBoundaryNotice(boundary));
+    },
   });
 
   // True only while an on-demand explanation is being fetched (see
@@ -410,12 +423,13 @@ export default function Staff() {
     };
     const activePreferences = toGenerationPreferences(baseInterpretation);
     const interpretedPreferences = toGenerationPreferences(data);
+    const relativeStyleChange = getRelativeStyleChange(normalizedPrompt);
 
     const resolvedPreferences = resolveCreativeRevisionPreferences(
       activePreferences,
       interpretedPreferences,
       revisionIntent.requestedChanges,
-      getRelativeStyleChange(normalizedPrompt),
+      relativeStyleChange,
     );
 
     const effectivePreferences: GenerationPreferences = {
@@ -468,8 +482,69 @@ export default function Staff() {
       mode: "revise_existing",
       commitLabel: "Updated",
       requestSummary: normalizedPrompt,
+      directionalStyleChange:
+        relativeStyleChange === "jazzier"
+          ? "jazzy"
+          : relativeStyleChange === "simpler"
+            ? "simple"
+            : undefined,
     });
     setPendingClarification(null);
+  }
+
+  function handleStyleAlternativeRequest(
+    pending: PendingStyleAlternative,
+    normalizedPrompt: string,
+  ) {
+    const currentProgression = lastProgressionRef.current;
+    const search = currentProgression
+      ? buildStyleAlternativeSearch(pending, currentProgression)
+      : null;
+    if (!currentProgression || !search) {
+      setPendingStyleAlternative(null);
+      pushAssistantMessage(
+        "The progression changed since that offer, so ask for different options again.",
+      );
+      return;
+    }
+
+    const generatedKey = getGenerationKey(
+      keySignature,
+      generationMode,
+      measures,
+      getRenderedPitch,
+    );
+    const resultInterpretation =
+      aiInterpretation ?? DEFAULT_INTERPRETED_STYLE;
+    const activePreferences = toGenerationPreferences(resultInterpretation);
+    const preferences: GenerationPreferences = {
+      ...activePreferences,
+      styleTransform: undefined,
+    };
+    setPendingStyleAlternative(null);
+    const opened = openCreativeCandidatePreview({
+      key: generatedKey,
+      measures,
+      getRenderedPitchFn: getRenderedPitch,
+      style: preferences.style,
+      preferences,
+      revision: search.revision,
+      resultInterpretation,
+      mode: search.mode,
+      commitLabel: "Updated",
+      requestSummary: normalizedPrompt,
+      styleConstraint: search.styleConstraint,
+      excludeSeenHashes: search.excludeSeenHashes,
+      emptyCandidateMessage:
+        "I couldn't find an unseen, structurally different option at the same style level. The current progression is unchanged.",
+    });
+    harmonyDebug("style_alternative_follow_up", {
+      reply: normalizedPrompt,
+      direction: pending.direction,
+      storedMetric: pending.metric,
+      baseProgressionId: pending.progressionId,
+      openedCandidateSetId: opened?.id ?? null,
+    });
   }
 
   // Direct-edit fast path. Applies pre-parsed exact edits to the current
@@ -547,6 +622,48 @@ export default function Staff() {
     pushAssistantMessage(question);
   }
 
+  function answerFocusedQuestionLocally(normalizedPrompt: string) {
+    const currentProgression = lastProgressionRef.current;
+    if (!currentProgression || currentProgression.length === 0) return false;
+
+    const generatedKey = getGenerationKey(
+      keySignature,
+      generationMode,
+      measures,
+      getRenderedPitch,
+    );
+    const progressionId = buildCandidateExplanationFacts({
+      progression: currentProgression,
+      activeKey: generatedKey.label,
+      requestSummary: normalizedPrompt,
+    }).progressionId;
+    const committedFacts = [...history.entries]
+      .reverse()
+      .find((entry) => entry.progressionId === progressionId)?.explanationFacts;
+    const facts =
+      committedFacts ??
+      buildCandidateExplanationFacts({
+        progression: currentProgression,
+        activeKey: generatedKey.label,
+        requestSummary: normalizedPrompt,
+      });
+    const focusedAnswer = answerFocusedHarmonyQuestion({
+      question: normalizedPrompt,
+      progression: currentProgression,
+      facts,
+    });
+    harmonyDebug("focused_question_resolution", {
+      question: normalizedPrompt,
+      progressionId,
+      usedStoredFacts: Boolean(committedFacts),
+      resolvedLocally: Boolean(focusedAnswer),
+    });
+    if (!focusedAnswer) return false;
+
+    pushExplanationMessage(focusedAnswer.overview, focusedAnswer.measures);
+    return true;
+  }
+
   // Explanations are surfaced ONLY here — when the user explicitly asks a
   // question. Nothing else in the app auto-requests an explanation. When there
   // is a progression to ground against, we fetch the grounded plain-English
@@ -566,40 +683,13 @@ export default function Staff() {
       return;
     }
 
+    if (answerFocusedQuestionLocally(normalizedPrompt)) return;
     const generatedKey = getGenerationKey(
       keySignature,
       generationMode,
       measures,
       getRenderedPitch,
     );
-    const progressionId = buildCandidateExplanationFacts({
-      progression: currentProgression,
-      activeKey: generatedKey.label,
-      requestSummary: normalizedPrompt,
-    }).progressionId;
-    const committedFacts = [...history.entries]
-      .reverse()
-      .find((entry) => entry.progressionId === progressionId)?.explanationFacts;
-    const facts = committedFacts ?? buildCandidateExplanationFacts({
-      progression: currentProgression,
-      activeKey: generatedKey.label,
-      requestSummary: normalizedPrompt,
-    });
-    const focusedAnswer = answerFocusedHarmonyQuestion({
-      question: normalizedPrompt,
-      progression: currentProgression,
-      facts,
-    });
-    harmonyDebug("focused_question_resolution", {
-      question: normalizedPrompt,
-      progressionId,
-      usedStoredFacts: Boolean(committedFacts),
-      resolvedLocally: Boolean(focusedAnswer),
-    });
-    if (focusedAnswer) {
-      pushExplanationMessage(focusedAnswer.overview, focusedAnswer.measures);
-      return;
-    }
     const request = buildExplanationRequest(
       currentProgression,
       chordMeasures,
@@ -629,6 +719,22 @@ export default function Staff() {
     pushExplanationMessage(answer.overview, answer.measures);
   }
 
+  function handleCandidateSelection(candidateSetId: string) {
+    const resolvesCurrentPreview =
+      candidateSet?.id === candidateSetId &&
+      candidateSet.status === "previewing";
+    handleSelectCandidate(candidateSetId);
+    if (resolvesCurrentPreview) setPendingStyleAlternative(null);
+  }
+
+  function handleCandidateCancellation(candidateSetId: string) {
+    const resolvesCurrentPreview =
+      candidateSet?.id === candidateSetId &&
+      candidateSet.status === "previewing";
+    handleCancelCandidate(candidateSetId);
+    if (resolvesCurrentPreview) setPendingStyleAlternative(null);
+  }
+
   // Route first, then generate, revise, clarify, or answer.
   async function handleGenerateProgression() {
     setIsGenerating(true);
@@ -650,54 +756,82 @@ export default function Staff() {
     setStylePrompt("");
 
     try {
+      const previousProgression = lastProgressionRef.current;
+      if (pendingStyleAlternative) {
+        const alternativeReply = getStyleAlternativeReply(normalizedPrompt);
+        if (alternativeReply === "accept") {
+          handleStyleAlternativeRequest(
+            pendingStyleAlternative,
+            normalizedPrompt,
+          );
+          return;
+        }
+        if (alternativeReply === "decline") {
+          setPendingStyleAlternative(null);
+          pushAssistantMessage("Okay, I'll keep the current progression.");
+          return;
+        }
+        setPendingStyleAlternative(null);
+      }
+
       if (normalizedPrompt === "") {
         handleGenerateNewProgression(normalizedPrompt);
         return;
       }
 
-      const previousProgression = lastProgressionRef.current;
-
       // Direct-edit fast path: if the whole prompt is nothing but one supported
-      // exact chord edit, apply it locally and skip BOTH Groq calls. Requires an
-      // existing progression to edit; anything else (style clauses, mixed
-      // prompts, questions) fails the total-parse gate and falls through to Groq.
-      if (previousProgression && previousProgression.length > 0) {
-        const directEdits = parsePureDirectEdits(
-          normalizedPrompt,
-          previousProgression.length,
-        );
-        harmonyDebug("direct_edit_parse", {
-          prompt: normalizedPrompt,
-          matched: Boolean(directEdits),
-          fallbackReason: directEdits
-            ? null
-            : /\b(?:measure|chord|bar)\b/i.test(normalizedPrompt)
-              ? "exact-edit-like prompt did not match supported syntax"
-              : "prompt is not a pure exact edit",
-          actions: directEdits ?? [],
-        });
-        if (directEdits) {
-          let request;
-          try {
-            request = directEditRequest(
-              directEdits,
-              previousProgression.length,
-            );
-          } catch (error) {
-            setAiError(
-              error instanceof Error
-                ? error.message
-                : "The exact edits conflict, so nothing was changed.",
-            );
-            return;
-          }
-          handleDirectEditShortcut(
-            normalizedPrompt,
-            request.intent === "direct_edit" ? request.actions : [],
-            previousProgression,
+      // exact chord edit, apply it locally and skip BOTH Groq calls. Parse even
+      // before a progression exists so an impossible edit can fail locally.
+      const directEdits = parsePureDirectEdits(
+        normalizedPrompt,
+        previousProgression?.length ?? 4,
+      );
+      harmonyDebug("direct_edit_parse", {
+        prompt: normalizedPrompt,
+        matched: Boolean(directEdits),
+        fallbackReason: directEdits
+          ? null
+          : /\b(?:measure|chord|bar)\b/i.test(normalizedPrompt)
+            ? "exact-edit-like prompt did not match supported syntax"
+            : "prompt is not a pure exact edit",
+        actions: directEdits ?? [],
+      });
+      if (directEdits) {
+        if (!previousProgression || previousProgression.length === 0) {
+          pushAssistantMessage(
+            "There is no existing progression to edit. Generate one first.",
           );
           return;
         }
+        let request;
+        try {
+          request = directEditRequest(
+            directEdits,
+            previousProgression.length,
+          );
+        } catch (error) {
+          setAiError(
+            error instanceof Error
+              ? error.message
+              : "The exact edits conflict, so nothing was changed.",
+          );
+          return;
+        }
+        handleDirectEditShortcut(
+          normalizedPrompt,
+          request.intent === "direct_edit" ? request.actions : [],
+          previousProgression,
+        );
+        return;
+      }
+
+      if (
+        previousProgression &&
+        isSupportedFocusedHarmonyQuestion(normalizedPrompt) &&
+        answerFocusedQuestionLocally(normalizedPrompt)
+      ) {
+        setPendingClarification(null);
+        return;
       }
 
       const currentProgressionSummary = previousProgression
@@ -837,6 +971,7 @@ export default function Staff() {
     // We do NOT auto-request an explanation here: copied chords carry stale
     // positional score/reasons, so a grounded explanation would be misleading.
     setAiError(null);
+    setPendingStyleAlternative(null);
   }
 
   // Development-only: lets the copy_chord slice be exercised from the browser
@@ -900,6 +1035,7 @@ export default function Staff() {
     // left intact so the history of the session stays readable.
     clearHarmonyState();
     setPendingClarification(null);
+    setPendingStyleAlternative(null);
     pushAssistantMessage("Chord progression cleared.");
   }
 
@@ -975,10 +1111,10 @@ export default function Staff() {
         isExplaining={isExplaining}
         isGenerating={isGenerating}
         messages={messages}
-        onCancelCandidate={handleCancelCandidate}
+        onCancelCandidate={handleCandidateCancellation}
         onComposerChange={setStylePrompt}
         onPreviewCandidate={handlePreviewCandidate}
-        onSelectCandidate={handleSelectCandidate}
+        onSelectCandidate={handleCandidateSelection}
         onExplainCandidate={handleExplainCandidate}
         onSubmit={handleGenerateProgression}
         placeholder={hasProgression ? REVISION_PLACEHOLDER : FRESH_PLACEHOLDER}
