@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parsePureDirectEdits } from "./directEditParser";
+import {
+  parseExplicitChordConstraints,
+  parsePureDirectEdits,
+} from "./directEditParser";
 
 // The staff is four measures in this pass.
 const N = 4;
@@ -20,6 +23,18 @@ describe("parsePureDirectEdits — accepts pure exact edits", () => {
     ]);
     expect(parsePureDirectEdits("update bar 4 to Dm7.", N)).toEqual([
       { type: "replace_chord", measure: 4, chordName: "Dm7" },
+    ]);
+  });
+
+  it("accepts natural make and keep phrasing without a connector", () => {
+    expect(parsePureDirectEdits("make measure 2 Dm", N)).toEqual([
+      { type: "replace_chord", measure: 2, chordName: "Dm" },
+    ]);
+    expect(parsePureDirectEdits("make measure three a C", N)).toEqual([
+      { type: "replace_chord", measure: 3, chordName: "C" },
+    ]);
+    expect(parsePureDirectEdits("keep measure four an Am", N)).toEqual([
+      { type: "replace_chord", measure: 4, chordName: "Am" },
     ]);
   });
 
@@ -73,6 +88,36 @@ describe("parsePureDirectEdits — accepts pure exact edits", () => {
       expected,
     );
   });
+
+  it("parses multiple exact edits only when every clause is supported", () => {
+    expect(
+      parsePureDirectEdits(
+        "change measure 2 to F and change measure 4 to Am",
+        N,
+      ),
+    ).toEqual([
+      { type: "replace_chord", measure: 2, chordName: "F" },
+      { type: "replace_chord", measure: 4, chordName: "Am" },
+    ]);
+  });
+});
+
+describe("parseExplicitChordConstraints", () => {
+  it("extracts a hard chord placement from a mixed creative request", () => {
+    expect(
+      parseExplicitChordConstraints(
+        "make it jazzier but keep measure four an Am",
+        N,
+      ),
+    ).toEqual([{ type: "replace_chord", measure: 4, chordName: "Am" }]);
+  });
+
+  it("does not reinterpret questions or pure style clauses as constraints", () => {
+    expect(
+      parseExplicitChordConstraints("why is measure three this chord", N),
+    ).toEqual([]);
+    expect(parseExplicitChordConstraints("make it jazzier", N)).toEqual([]);
+  });
 });
 
 describe("parsePureDirectEdits — defers to Groq (returns null)", () => {
@@ -88,6 +133,15 @@ describe("parsePureDirectEdits — defers to Groq (returns null)", () => {
     ).toBeNull();
     expect(
       parsePureDirectEdits("change measure 2 to C and make it jazzier", N),
+    ).toBeNull();
+  });
+
+  it("rejects a multi-edit when any clause is malformed", () => {
+    expect(
+      parsePureDirectEdits(
+        "change measure 2 to F and change measure 4 to H",
+        N,
+      ),
     ).toBeNull();
   });
 

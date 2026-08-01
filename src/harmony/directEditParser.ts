@@ -13,10 +13,8 @@ import { CHORD_SYMBOL } from "./chordSymbol";
 // you could have skipped); over-accepting is NOT (you would silently drop a
 // clause). So every check here is conservative — when in doubt, return null.
 //
-// Scope of this first pass (see implementation1.md):
-//  - one edit per prompt only (no "and"-joined multi-edits);
-//  - emits replace_chord / copy_chord actions, which the existing deterministic
-//    engine (harmony/actions.applyChordEdits) validates and applies.
+// Multiple edits are accepted only when every clause is a complete supported
+// edit. Creative or unparsed clauses cause the entire prompt to defer.
 
 // The shared chord-name vocabulary (see chordSymbol.ts). Aliased to CHORD so the
 // patterns below read the same.
@@ -68,11 +66,16 @@ function inRange(measure: number, measureCount: number): boolean {
 // chord to X". One measure, one chord. Emitted as replace_chord so the literal
 // name is resolved by buildNamedChord in the shared engine.
 const SINGLE_KEYWORD_FIRST = new RegExp(
-  `^\\s*(?:change|set|make|replace|update)\\s+(?:the\\s+)?(?:measure|chord|bar)\\s+(${TARGET})(?:st|nd|rd|th)?\\s+(?:to|with|=)\\s+(${CHORD})\\s*[.!?]?\\s*$`,
+  `^\\s*(?:change|set|make|replace|update)\\s+(?:the\\s+)?(?:measure|chord|bar)\\s+(${TARGET})(?:st|nd|rd|th)?\\s+(?:(?:to|with|=)\\s+)?(?:an?\\s+)?(${CHORD})\\s*[.!?]?\\s*$`,
   "i",
 );
 const SINGLE_ORDINAL_FIRST = new RegExp(
-  `^\\s*(?:change|set|make|replace|update)\\s+(?:the\\s+)?(${TARGET})(?:st|nd|rd|th)?\\s+(?:measure|chord|bar)\\s+(?:to|with|=)\\s+(${CHORD})\\s*[.!?]?\\s*$`,
+  `^\\s*(?:change|set|make|replace|update)\\s+(?:the\\s+)?(${TARGET})(?:st|nd|rd|th)?\\s+(?:measure|chord|bar)\\s+(?:(?:to|with|=)\\s+)?(?:an?\\s+)?(${CHORD})\\s*[.!?]?\\s*$`,
+  "i",
+);
+
+const KEEP_CHORD = new RegExp(
+  `^\\s*keep\\s+(?:the\\s+)?(?:measure|chord|bar)\\s+(${TARGET})(?:st|nd|rd|th)?\\s+(?:(?:as|at|to|=)\\s+)?(?:an?\\s+)?(${CHORD})\\s*[.!?]?\\s*$`,
   "i",
 );
 
@@ -98,7 +101,9 @@ function parseSingleEdit(
   measureCount: number,
 ): ChordEditAction[] | null {
   const match =
-    SINGLE_KEYWORD_FIRST.exec(prompt) ?? SINGLE_ORDINAL_FIRST.exec(prompt);
+    SINGLE_KEYWORD_FIRST.exec(prompt) ??
+    SINGLE_ORDINAL_FIRST.exec(prompt) ??
+    KEEP_CHORD.exec(prompt);
   if (!match) return null;
 
   const measure = tokenToMeasure(match[1]);
@@ -107,6 +112,22 @@ function parseSingleEdit(
   if (!isValidChordName(chordName)) return null;
 
   return [{ type: "replace_chord", measure, chordName }];
+}
+
+/**
+ * Extracts explicit chord placements from mixed creative requests without
+ * treating the whole request as a direct edit. Unrecognized clauses remain for
+ * the interpretation layer; recognized placements become hard constraints.
+ */
+export function parseExplicitChordConstraints(
+  prompt: string,
+  measureCount: number,
+): ChordEditAction[] {
+  if (measureCount < 1) return [];
+  return prompt
+    .replace(/[.!?]+$/, "")
+    .split(/\s*(?:;|\band\b|\bbut\b)\s*/i)
+    .flatMap((clause) => parseSingleEdit(clause.trim(), measureCount) ?? []);
 }
 
 function parseCopyEdit(
@@ -165,9 +186,24 @@ export function parsePureDirectEdits(
   const trimmed = prompt.trim();
   if (trimmed.length === 0) return null;
 
-  return (
+  const single =
     parseSingleEdit(trimmed, measureCount) ??
     parseCopyEdit(trimmed, measureCount) ??
-    parseSetProgression(trimmed, measureCount)
+    parseSetProgression(trimmed, measureCount);
+  if (single) return single;
+
+  const clauses = trimmed
+    .replace(/[.!?]+$/, "")
+    .split(/\s*(?:;|\band\b)\s*/i)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+  if (clauses.length < 2) return null;
+
+  const parsed = clauses.map(
+    (clause) =>
+      parseSingleEdit(clause, measureCount) ??
+      parseCopyEdit(clause, measureCount),
   );
+  if (parsed.some((actions) => actions === null)) return null;
+  return parsed.flatMap((actions) => actions ?? []);
 }

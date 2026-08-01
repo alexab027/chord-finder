@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_HARMONY_PROFILE } from "../harmony/preferences";
+import { buildNamedChord } from "./chords";
 import type { ChordCandidate, KeyContext, PlacedNote } from "./types";
-import { scoreMelodyFit } from "./chordScoring";
+import { scoreChord, scoreMelodyFit } from "./chordScoring";
 
 const cMajor: KeyContext = {
   signature: "C",
@@ -8,6 +10,14 @@ const cMajor: KeyContext = {
   tonicName: "c",
   tonicPc: 0,
   mode: "major",
+};
+
+const aMinor: KeyContext = {
+  signature: "C",
+  label: "A minor",
+  tonicName: "a",
+  tonicPc: 9,
+  mode: "minor",
 };
 
 function triad(name: string, pcs: number[]): ChordCandidate {
@@ -130,5 +140,29 @@ describe("melody-fit scoring", () => {
 
     expect(tolerant.points).toBeGreaterThan(strict.points);
     expect(tolerant.points).toBeLessThan(0);
+  });
+
+  it("does not force a repeated G melody into an Am7 accompaniment in simple mode", () => {
+    const melody = [
+      note("g/5", 0, 2),
+      note("g/5", 2, 2),
+      note("g/5", 4, 2),
+      note("g/5", 6, 2),
+    ];
+    const am = buildNamedChord(aMinor, "Am")!;
+    const am7 = buildNamedChord(aMinor, "Am7")!;
+    const context = {
+      key: aMinor,
+      style: "simple" as const,
+      measureNotes: melody,
+      measureIndex: 0,
+      measureCount: 4,
+      getRenderedPitchFn: renderPitch,
+      preferences: DEFAULT_HARMONY_PROFILE,
+    };
+
+    expect(scoreChord(am, context).score).toBeGreaterThan(
+      scoreChord(am7, context).score,
+    );
   });
 });

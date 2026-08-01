@@ -1,4 +1,4 @@
-import type { StyleOption } from "@/src/music/types";
+import type { StyleIntensity, StyleOption } from "@/src/music/types";
 import type { ChordEditAction } from "@/src/harmony/actions";
 import {
   DEFAULT_HARMONY_PROFILE,
@@ -14,7 +14,7 @@ export type HarmonyIntent =
 export type PendingClarification = {
   originalMessage: string;
   question: string;
-  possibleIntents?: string[];
+  possibleIntents?: HarmonyIntent[];
 };
 
 export type InterpretedStyle = {
@@ -31,6 +31,8 @@ export type InterpretedStyle = {
   playabilityRequired: boolean;
   mood: string[];
   summary: string;
+  simplicityLevel?: StyleIntensity;
+  jazzLevel?: StyleIntensity;
 };
 
 export const DEFAULT_INTERPRETED_STYLE: InterpretedStyle = {
@@ -51,12 +53,7 @@ export const DEFAULT_INTERPRETED_STYLE: InterpretedStyle = {
 
 // Mirrors the StyleOption union so the server route can validate the model's
 // chosen style without weakening primaryStyle to a broad string.
-export const ALLOWED_STYLES: StyleOption[] = [
-  "simple",
-  "jazzy",
-  "bluesy",
-  "descendingBass",
-];
+export const ALLOWED_STYLES: StyleOption[] = ["simple", "jazzy"];
 
 // Returned by the interpretation route only when the request says a progression
 // already exists. It tells the deterministic engine HOW MUCH to keep, never

@@ -18,120 +18,51 @@ type MusicSymbolProps = {
   className?: string;
 };
 
-const NOTE_GLYPHS: Partial<Record<MusicSymbolName, string>> = {
+const MUSIC_GLYPHS: Record<MusicSymbolName, string> = {
   "whole-note": VexFlow.Glyphs.noteWhole,
   "half-note": VexFlow.Glyphs.noteHalfUp,
   "quarter-note": VexFlow.Glyphs.noteQuarterUp,
   "eighth-note": VexFlow.Glyphs.note8thUp,
+  "whole-rest": VexFlow.Glyphs.restWhole,
+  "half-rest": VexFlow.Glyphs.restHalf,
+  "quarter-rest": VexFlow.Glyphs.restQuarter,
+  "eighth-rest": VexFlow.Glyphs.rest8th,
+  sharp: VexFlow.Glyphs.accidentalSharp,
+  flat: VexFlow.Glyphs.accidentalFlat,
+  natural: VexFlow.Glyphs.accidentalNatural,
+};
+
+const VERTICAL_OFFSET: Record<MusicSymbolName, number> = {
+  "whole-note": 7,
+  "half-note": 7,
+  "quarter-note": 7,
+  "eighth-note": 7,
+  "whole-rest": 3,
+  "half-rest": 3,
+  "quarter-rest": 3,
+  "eighth-rest": 3,
+  sharp: 4,
+  flat: 4,
+  natural: 4,
 };
 
 export default function MusicSymbol({
   name,
   className = "h-5 w-5",
 }: MusicSymbolProps) {
-  const noteGlyph = NOTE_GLYPHS[name];
-
-  if (noteGlyph) {
-    return (
-      <span
-        aria-hidden="true"
-        className={`inline-flex items-center justify-center ${className}`}
-        style={{
-          fontFamily: "Bravura",
-          fontSize: "23px",
-          lineHeight: 1,
-          transform: "translateY(7px)",
-        }}
-      >
-        {noteGlyph}
-      </span>
-    );
-  }
-
   return (
-    <svg
+    <span
       aria-hidden="true"
-      className={className}
-      fill="none"
-      focusable="false"
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
+      className={`inline-flex items-center justify-center ${className}`}
+      data-music-symbol={name}
+      style={{
+        fontFamily: "Bravura",
+        fontSize: "23px",
+        lineHeight: 1,
+        transform: `translateY(${VERTICAL_OFFSET[name]}px)`,
+      }}
     >
-      {name === "whole-rest" && (
-        <>
-          <path d="M5 8h14" stroke="currentColor" strokeWidth="1.75" />
-          <path d="M8 8h8v5H8z" fill="currentColor" />
-        </>
-      )}
-
-      {name === "half-rest" && (
-        <>
-          <path d="M5 15h14" stroke="currentColor" strokeWidth="1.75" />
-          <path d="M8 10h8v5H8z" fill="currentColor" />
-        </>
-      )}
-
-      {name === "quarter-rest" && (
-        <path
-          d="m13.8 3.5-4.1 5 3.4 3.2-2.8 3.3 3 2.4-2.1 3.1"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2.4"
-        />
-      )}
-
-      {name === "eighth-rest" && (
-        <>
-          <circle cx="9" cy="7" fill="currentColor" r="2.4" />
-          <path
-            d="M10.8 7.8h5.3l-4.3 11"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2.2"
-          />
-        </>
-      )}
-
-      {name === "sharp" && (
-        <>
-          <path
-            d="M9 3 8 21M16 3l-1 18"
-            stroke="currentColor"
-            strokeWidth="1.8"
-          />
-          <path
-            d="m5.5 9.5 13-2M5 16.5l13-2"
-            stroke="currentColor"
-            strokeWidth="2.2"
-          />
-        </>
-      )}
-
-      {name === "flat" && (
-        <>
-          <path d="M9 3v18" stroke="currentColor" strokeWidth="2" />
-          <path
-            d="M9 11.5c6-3.6 9.2 4.8 0 7.2"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2"
-          />
-        </>
-      )}
-
-      {name === "natural" && (
-        <>
-          <path d="M8 3v15M16 6v15" stroke="currentColor" strokeWidth="2" />
-          <path
-            d="m8 11 8-2.5M8 16l8-2.5"
-            stroke="currentColor"
-            strokeWidth="2"
-          />
-        </>
-      )}
-    </svg>
+      {MUSIC_GLYPHS[name]}
+    </span>
   );
 }

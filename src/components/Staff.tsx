@@ -3,28 +3,58 @@
 import { useEffect, useRef, useState } from "react";
 import * as Tone from "tone";
 import { playMeasuresAudio } from "../audio/playback";
-import { chooseProgression } from "../music/chordGeneration";
 import { getGenerationKey } from "../music/keyDetection";
 import { DURATION_TO_SLOTS } from "../music/noteUtils";
 import {
   getStaffGeometry,
   getMeasureInfoFromClick,
+  EDITOR_PANEL_WIDTH,
+  STAFF_FRAME_WIDTH,
 } from "./chord-finder/staffGeometry";
 import { voiceProgression } from "../music/voicing";
 import {
   applyChordEdit,
-  applyChordEdits,
   HarmonyActionError,
   type ChordEditAction,
 } from "../harmony/actions";
+import { applyChordEditTransaction } from "../harmony/actionTransaction";
 import { parsePureDirectEdits } from "../harmony/directEditParser";
-import { applyHarmonyPreferencePatch } from "../harmony/preferences";
+import { candidateHash } from "../harmony/candidates/candidateHash";
+import {
+  buildCandidateExplanationFacts,
+} from "../harmony/explanations/facts";
+import {
+  answerFocusedHarmonyQuestion,
+  explainCandidateFacts,
+} from "../harmony/explanations/focusedAnswer";
+import {
+  directEditRequest,
+  normalizeHarmonyRequest,
+} from "../harmony/request";
+import {
+  asksForExplicitDescendingBass,
+  getRelativeStyleChange,
+  getStyleAlternativeReply,
+  isSupportedFocusedHarmonyQuestion,
+} from "../harmony/requestLanguage";
+import {
+  buildStyleAlternativeSearch,
+  getStyleBoundaryNotice,
+  type PendingStyleAlternative,
+} from "../harmony/styleBoundary";
+import {
+  resolveCreativeRevisionPreferences,
+} from "../harmony/preferences";
 import { useHarmonyMessages } from "./chord-finder/useHarmonyMessages";
+import { useHarmonyController } from "./chord-finder/useHarmonyController";
+import {
+  harmonyDebug,
+  harmonyDebugError,
+} from "./chord-finder/harmonyDebug";
 import type {
   DurationName,
   GenerationMode,
   GenerationPreferences,
-  PlacedChord,
   PlacedNote,
   RevisionContext,
   ScoredChord,
@@ -47,6 +77,7 @@ import {
   type CurrentProgressionItem,
 } from "../music/progressionPresentation";
 import HarmonyToolbar from "./chord-finder/HarmonyToolbar";
+import HarmonyPlaybackPanel from "./chord-finder/HarmonyPlaybackPanel";
 import HarmonyChat from "./chord-finder/HarmonyChat";
 import { renderPitch, yToPitch } from "./chord-finder/pitchSpelling";
 import StaffRenderer from "./chord-finder/StaffRenderer";
@@ -73,19 +104,6 @@ const FRESH_PLACEHOLDER =
 const REVISION_PLACEHOLDER =
   "Example: Keep this progression but make it slightly more complex";
 
-function asksForExplicitDescendingBass(prompt: string) {
-  return /\bdescending\s+bass(?:\s*line|line)?\b/i.test(prompt);
-}
-
-function getEffectiveStyle(
-  prompt: string,
-  fallbackStyle: StyleOption,
-): StyleOption {
-  return asksForExplicitDescendingBass(prompt)
-    ? "descendingBass"
-    : fallbackStyle;
-}
-
 export default function Staff() {
   const staffWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -101,11 +119,11 @@ export default function Staff() {
   // style summary for the explanation); it is no longer shown to the user.
   const [stylePrompt, setStylePrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [aiInterpretation, setAiInterpretation] =
-    useState<InterpretedStyle | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [pendingClarification, setPendingClarification] =
     useState<PendingClarification | null>(null);
+  const [pendingStyleAlternative, setPendingStyleAlternative] =
+    useState<PendingStyleAlternative | null>(null);
   // The persistent harmony conversation: user prompts, assistant answers, and
   // progression cards, in order. Append-only so the chat reads naturally.
   const {
@@ -113,12 +131,32 @@ export default function Staff() {
     pushUserMessage,
     pushAssistantMessage,
     pushProgressionCard,
+    pushCandidateMessage,
     pushExplanationMessage,
   } = useHarmonyMessages();
-
-  // The full scored progression behind the rendered chords. Kept in a ref (not
-  // rendered) so revisions can pass the current chord identities into scoring.
-  const lastProgressionRef = useRef<ScoredChord[] | null>(null);
+  const {
+    aiInterpretation,
+    candidateSet,
+    chordMeasures,
+    history,
+    lastProgressionRef,
+    commitProgressionState,
+    openCreativeCandidatePreview,
+    handlePreviewCandidate,
+    handleSelectCandidate,
+    handleCancelCandidate,
+    clearHarmonyState,
+  } = useHarmonyController({
+    pushCandidateMessage,
+    pushProgressionCard,
+    pushAssistantMessage,
+    setError: setAiError,
+    resolvePendingClarification: () => setPendingClarification(null),
+    onStyleBoundary: ({ boundary, pending }) => {
+      setPendingStyleAlternative(pending);
+      pushAssistantMessage(getStyleBoundaryNotice(boundary));
+    },
+  });
 
   // True only while an on-demand explanation is being fetched (see
   // handleAnswerQuestion). Explanations are never requested automatically.
@@ -134,12 +172,6 @@ export default function Staff() {
   const [measures, setMeasures] = useState<PlacedNote[][]>([[], [], [], []]);
   const currentSamplerRef = useRef<Tone.Sampler | null>(null);
   const currentPartRef = useRef<Tone.Part | null>(null);
-  const [chordMeasures, setChordMeasures] = useState<PlacedChord[][]>([
-    [],
-    [],
-    [],
-    [],
-  ]);
   const geometry = getStaffGeometry(keySignature);
   const { firstMeasureExtra, rendererWidth, rendererHeight } = geometry;
 
@@ -231,8 +263,17 @@ export default function Staff() {
           pendingClarification,
         }),
       });
-      return (await response.json()) as HarmonyRouterResponse;
-    } catch {
+      const result = (await response.json()) as HarmonyRouterResponse;
+      harmonyDebug("interpretation_received", {
+        httpStatus: response.status,
+        intent: result.intent,
+        warning: result.warning ?? null,
+        actionCount: result.actions?.length ?? 0,
+        revision: result.revision ?? null,
+      });
+      return result;
+    } catch (error) {
+      harmonyDebugError("interpretation_request_failed", error, { prompt });
       return null;
     }
   }
@@ -273,19 +314,25 @@ export default function Staff() {
   function renderProgression(
     finalProgression: ScoredChord[],
     keyLabel: string,
-    effectiveStyle: StyleOption,
     label: "Generated" | "Updated",
     preferences?: GenerationPreferences,
+    exactActions: readonly ChordEditAction[] = [],
+    requestSummary = "Direct chord edit",
   ) {
     const voicedProgression = voiceProgression(
       finalProgression,
       measures,
       getRenderedPitch,
-      effectiveStyle,
       preferences,
     );
-    lastProgressionRef.current = finalProgression;
-    setChordMeasures(voicedProgression);
+    commitProgressionState(finalProgression, voicedProgression, {
+      explanationFacts: buildCandidateExplanationFacts({
+        progression: finalProgression,
+        activeKey: keyLabel,
+        requestSummary,
+        exactActions,
+      }),
+    });
     pushProgressionCard(label, keyLabel, finalProgression);
     return voicedProgression;
   }
@@ -298,10 +345,13 @@ export default function Staff() {
     if (requestedActions.length === 0) return baseProgression;
 
     try {
-      return applyChordEdits(baseProgression, requestedActions, {
+      return applyChordEditTransaction(baseProgression, requestedActions, {
         key: generatedKey,
       });
     } catch (editError) {
+      harmonyDebugError("direct_edit_failed", editError, {
+        actions: requestedActions,
+      });
       setAiError(
         editError instanceof HarmonyActionError
           ? editError.message
@@ -315,20 +365,14 @@ export default function Staff() {
     normalizedPrompt: string,
     data?: HarmonyRouterResponse,
   ): void {
-    const effectiveStyle = getEffectiveStyle(
-      normalizedPrompt,
-      data?.primaryStyle ?? BLANK_PROMPT_STYLE,
-    );
+    const effectiveStyle = data?.primaryStyle ?? BLANK_PROMPT_STYLE;
     const preferences = toGenerationPreferences(
       data ?? DEFAULT_INTERPRETED_STYLE,
     );
     const requestedActions = data?.actions ?? [];
 
-    if (data) {
-      setAiInterpretation(data);
-    } else {
-      setAiInterpretation(DEFAULT_INTERPRETED_STYLE);
-    }
+    const resultInterpretation: InterpretedStyle =
+      data ?? DEFAULT_INTERPRETED_STYLE;
 
     const generatedKey = getGenerationKey(
       keySignature,
@@ -337,26 +381,19 @@ export default function Staff() {
       getRenderedPitch,
     );
 
-    const baseProgression = chooseProgression(
-      generatedKey,
+    openCreativeCandidatePreview({
+      key: generatedKey,
       measures,
-      getRenderedPitch,
-      effectiveStyle,
+      getRenderedPitchFn: getRenderedPitch,
+      style: effectiveStyle,
       preferences,
-    );
-    const finalProgression = applyRequestedActions(
-      baseProgression,
-      requestedActions,
-      generatedKey,
-    );
-
-    renderProgression(
-      finalProgression,
-      generatedKey.label,
-      effectiveStyle,
-      "Generated",
-      preferences,
-    );
+      resultInterpretation,
+      exactActions: requestedActions,
+      mode: "generate_new",
+      commitLabel: "Generated",
+      requestSummary:
+        normalizedPrompt || "Generate the best-fitting progression.",
+    });
     setPendingClarification(null);
   }
 
@@ -380,60 +417,6 @@ export default function Staff() {
     );
     const requestedActions = data.actions ?? [];
 
-    if (requestedActions.length > 0) {
-      const effectiveStyle = getEffectiveStyle(
-        normalizedPrompt,
-        aiInterpretation?.primaryStyle ?? BLANK_PROMPT_STYLE,
-      );
-      // Apply only the returned preference patch to the current active
-      // preferences so a combined request (deterministic chord actions plus an
-      // explicit style/preference change like "make it jazzier") applies both.
-      // Unrelated preferences are preserved by applyHarmonyPreferencePatch.
-      const activePreferences = toGenerationPreferences(
-        aiInterpretation ?? DEFAULT_INTERPRETED_STYLE,
-      );
-      const effectivePreferences: GenerationPreferences = {
-        ...applyHarmonyPreferencePatch(
-          activePreferences,
-          data.revision?.requestedChanges ?? {},
-        ),
-        style: effectiveStyle,
-      };
-      const baseInterpretationForActions =
-        aiInterpretation ?? DEFAULT_INTERPRETED_STYLE;
-      const appliedInterpretation: InterpretedStyle = {
-        ...baseInterpretationForActions,
-        primaryStyle: effectiveStyle,
-        descendingBassWeight: effectivePreferences.descendingBassWeight,
-        complexity: effectivePreferences.complexity,
-        dissonanceTolerance: effectivePreferences.dissonanceTolerance,
-        cadenceStrength: effectivePreferences.cadenceStrength,
-        preferSevenths: effectivePreferences.preferSevenths,
-        preferSuspensions: effectivePreferences.preferSuspensions,
-        melodyFitPriority: effectivePreferences.melodyFitPriority,
-        consonancePriority: effectivePreferences.consonancePriority,
-        voiceLeadingPriority: effectivePreferences.voiceLeadingPriority,
-        playabilityRequired: effectivePreferences.playabilityRequired,
-      };
-      setAiInterpretation(appliedInterpretation);
-
-      const finalProgression = applyRequestedActions(
-        previousProgression,
-        requestedActions,
-        generatedKey,
-      );
-
-      renderProgression(
-        finalProgression,
-        generatedKey.label,
-        effectiveStyle,
-        "Updated",
-        effectivePreferences,
-      );
-      setPendingClarification(null);
-      return;
-    }
-
     const baseInterpretation = aiInterpretation ?? DEFAULT_INTERPRETED_STYLE;
     const revisionIntent: RevisionIntent = data.revision ?? {
       preserveOverallProgression: true,
@@ -441,21 +424,26 @@ export default function Staff() {
       changeAmount: 0.3,
       requestedChanges: {},
     };
-    const applied = applyHarmonyPreferencePatch(
-      toGenerationPreferences(baseInterpretation),
+    const activePreferences = toGenerationPreferences(baseInterpretation);
+    const interpretedPreferences = toGenerationPreferences(data);
+    const relativeStyleChange = getRelativeStyleChange(normalizedPrompt);
+
+    const resolvedPreferences = resolveCreativeRevisionPreferences(
+      activePreferences,
+      interpretedPreferences,
       revisionIntent.requestedChanges,
+      relativeStyleChange,
     );
-    const effectiveStyle = getEffectiveStyle(
-      normalizedPrompt,
-      baseInterpretation.primaryStyle,
-    );
+
     const effectivePreferences: GenerationPreferences = {
-      ...applied,
-      style: effectiveStyle,
+      ...resolvedPreferences,
       descendingBassWeight: asksForExplicitDescendingBass(normalizedPrompt)
         ? 1
-        : applied.descendingBassWeight,
+        : resolvedPreferences.descendingBassWeight,
     };
+
+    const effectiveStyle = effectivePreferences.style;
+
     const revision: RevisionContext = {
       targets: previousProgression.map((scoredChord) => ({
         degree: scoredChord.chord.degree,
@@ -481,32 +469,85 @@ export default function Staff() {
       consonancePriority: effectivePreferences.consonancePriority,
       voiceLeadingPriority: effectivePreferences.voiceLeadingPriority,
       playabilityRequired: effectivePreferences.playabilityRequired,
+      simplicityLevel: effectivePreferences.simplicityLevel,
+      jazzLevel: effectivePreferences.jazzLevel,
       summary: data.summary || baseInterpretation.summary,
     };
-    setAiInterpretation(appliedInterpretation);
+    openCreativeCandidatePreview({
+      key: generatedKey,
+      measures,
+      getRenderedPitchFn: getRenderedPitch,
+      style: effectiveStyle,
+      preferences: effectivePreferences,
+      revision,
+      resultInterpretation: appliedInterpretation,
+      exactActions: requestedActions,
+      mode: "revise_existing",
+      commitLabel: "Updated",
+      requestSummary: normalizedPrompt,
+      directionalStyleChange:
+        relativeStyleChange === "jazzier"
+          ? "jazzy"
+          : relativeStyleChange === "simpler"
+            ? "simple"
+            : undefined,
+    });
+    setPendingClarification(null);
+  }
 
-    const baseProgression = chooseProgression(
-      generatedKey,
+  function handleStyleAlternativeRequest(
+    pending: PendingStyleAlternative,
+    normalizedPrompt: string,
+  ) {
+    const currentProgression = lastProgressionRef.current;
+    const search = currentProgression
+      ? buildStyleAlternativeSearch(pending, currentProgression)
+      : null;
+    if (!currentProgression || !search) {
+      setPendingStyleAlternative(null);
+      pushAssistantMessage(
+        "The progression changed since that offer, so ask for different options again.",
+      );
+      return;
+    }
+
+    const generatedKey = getGenerationKey(
+      keySignature,
+      generationMode,
       measures,
       getRenderedPitch,
-      effectiveStyle,
-      effectivePreferences,
-      revision,
     );
-    const finalProgression = applyRequestedActions(
-      baseProgression,
-      data.actions ?? [],
-      generatedKey,
-    );
-
-    renderProgression(
-      finalProgression,
-      generatedKey.label,
-      effectiveStyle,
-      "Updated",
-      effectivePreferences,
-    );
-    setPendingClarification(null);
+    const resultInterpretation =
+      aiInterpretation ?? DEFAULT_INTERPRETED_STYLE;
+    const activePreferences = toGenerationPreferences(resultInterpretation);
+    const preferences: GenerationPreferences = {
+      ...activePreferences,
+      styleTransform: undefined,
+    };
+    setPendingStyleAlternative(null);
+    const opened = openCreativeCandidatePreview({
+      key: generatedKey,
+      measures,
+      getRenderedPitchFn: getRenderedPitch,
+      style: preferences.style,
+      preferences,
+      revision: search.revision,
+      resultInterpretation,
+      mode: search.mode,
+      commitLabel: "Updated",
+      requestSummary: normalizedPrompt,
+      styleConstraint: search.styleConstraint,
+      excludeSeenHashes: search.excludeSeenHashes,
+      emptyCandidateMessage:
+        "I couldn't find an unseen, structurally different option at the same style level. The current progression is unchanged.",
+    });
+    harmonyDebug("style_alternative_follow_up", {
+      reply: normalizedPrompt,
+      direction: pending.direction,
+      storedMetric: pending.metric,
+      baseProgressionId: pending.progressionId,
+      openedCandidateSetId: opened?.id ?? null,
+    });
   }
 
   // Direct-edit fast path. Applies pre-parsed exact edits to the current
@@ -545,29 +586,85 @@ export default function Staff() {
     // surfacing the error via setAiError). Don't claim a successful update then.
     if (finalProgression === previousProgression) return;
 
+    if (candidateHash(finalProgression) === candidateHash(previousProgression)) {
+      harmonyDebug("direct_edit_no_op", {
+        prompt: normalizedPrompt,
+        actions,
+        progressionId: candidateHash(previousProgression),
+      });
+      pushAssistantMessage(
+        "That exact edit is already reflected in the current progression, so nothing changed.",
+      );
+      setPendingClarification(null);
+      return;
+    }
+
     renderProgression(
       finalProgression,
       generatedKey.label,
-      effectiveStyle,
       "Updated",
       effectivePreferences,
+      actions,
+      normalizedPrompt,
     );
+    harmonyDebug("direct_edit_applied", {
+      prompt: normalizedPrompt,
+      actions,
+      activeKey: generatedKey.label,
+      before: previousProgression.map(({ chord }) => chord.absoluteSymbol),
+      after: finalProgression.map(({ chord }) => chord.absoluteSymbol),
+    });
     setPendingClarification(null);
   }
 
-  function handleClarification(
-    data: HarmonyRouterResponse,
-    originalMessage: string,
-  ) {
-    const question =
-      data.clarificationQuestion ??
-      "Could you clarify whether you want a new progression or a change to the current one?";
-
+  function handleClarification(question: string, originalMessage: string) {
     setPendingClarification({
       originalMessage,
       question,
     });
     pushAssistantMessage(question);
+  }
+
+  function answerFocusedQuestionLocally(normalizedPrompt: string) {
+    const currentProgression = lastProgressionRef.current;
+    if (!currentProgression || currentProgression.length === 0) return false;
+
+    const generatedKey = getGenerationKey(
+      keySignature,
+      generationMode,
+      measures,
+      getRenderedPitch,
+    );
+    const progressionId = buildCandidateExplanationFacts({
+      progression: currentProgression,
+      activeKey: generatedKey.label,
+      requestSummary: normalizedPrompt,
+    }).progressionId;
+    const committedFacts = [...history.entries]
+      .reverse()
+      .find((entry) => entry.progressionId === progressionId)?.explanationFacts;
+    const facts =
+      committedFacts ??
+      buildCandidateExplanationFacts({
+        progression: currentProgression,
+        activeKey: generatedKey.label,
+        requestSummary: normalizedPrompt,
+      });
+    const focusedAnswer = answerFocusedHarmonyQuestion({
+      question: normalizedPrompt,
+      progression: currentProgression,
+      facts,
+    });
+    harmonyDebug("focused_question_resolution", {
+      question: normalizedPrompt,
+      progressionId,
+      usedStoredFacts: Boolean(committedFacts),
+      resolvedLocally: Boolean(focusedAnswer),
+    });
+    if (!focusedAnswer) return false;
+
+    pushExplanationMessage(focusedAnswer.overview, focusedAnswer.measures);
+    return true;
   }
 
   // Explanations are surfaced ONLY here — when the user explicitly asks a
@@ -589,6 +686,7 @@ export default function Staff() {
       return;
     }
 
+    if (answerFocusedQuestionLocally(normalizedPrompt)) return;
     const generatedKey = getGenerationKey(
       keySignature,
       generationMode,
@@ -614,12 +712,43 @@ export default function Staff() {
     void requestExplanation(request);
   }
 
+  function handleExplainCandidate(candidateSetId: string) {
+    if (!candidateSet || candidateSet.id !== candidateSetId) return;
+    const candidate = candidateSet.candidates.find(
+      (item) => item.id === candidateSet.previewedCandidateId,
+    );
+    if (!candidate?.explanationFacts) return;
+    const answer = explainCandidateFacts(candidate.explanationFacts);
+    pushExplanationMessage(answer.overview, answer.measures);
+  }
+
+  function handleCandidateSelection(candidateSetId: string) {
+    const resolvesCurrentPreview =
+      candidateSet?.id === candidateSetId &&
+      candidateSet.status === "previewing";
+    handleSelectCandidate(candidateSetId);
+    if (resolvesCurrentPreview) setPendingStyleAlternative(null);
+  }
+
+  function handleCandidateCancellation(candidateSetId: string) {
+    const resolvesCurrentPreview =
+      candidateSet?.id === candidateSetId &&
+      candidateSet.status === "previewing";
+    handleCancelCandidate(candidateSetId);
+    if (resolvesCurrentPreview) setPendingStyleAlternative(null);
+  }
+
   // Route first, then generate, revise, clarify, or answer.
   async function handleGenerateProgression() {
     setIsGenerating(true);
     setAiError(null);
 
     const normalizedPrompt = stylePrompt.trim();
+    harmonyDebug("request_submitted", {
+      prompt: normalizedPrompt || "Generate best-fit progression",
+      hasCommittedProgression: Boolean(lastProgressionRef.current?.length),
+      candidatePreviewStatus: candidateSet?.status ?? null,
+    });
     // Record the user's turn in the conversation, then clear the input so the
     // chat reads as a back-and-forth. A blank prompt means "best fit for me".
     pushUserMessage(
@@ -630,30 +759,82 @@ export default function Staff() {
     setStylePrompt("");
 
     try {
+      const previousProgression = lastProgressionRef.current;
+      if (pendingStyleAlternative) {
+        const alternativeReply = getStyleAlternativeReply(normalizedPrompt);
+        if (alternativeReply === "accept") {
+          handleStyleAlternativeRequest(
+            pendingStyleAlternative,
+            normalizedPrompt,
+          );
+          return;
+        }
+        if (alternativeReply === "decline") {
+          setPendingStyleAlternative(null);
+          pushAssistantMessage("Okay, I'll keep the current progression.");
+          return;
+        }
+        setPendingStyleAlternative(null);
+      }
+
       if (normalizedPrompt === "") {
         handleGenerateNewProgression(normalizedPrompt);
         return;
       }
 
-      const previousProgression = lastProgressionRef.current;
-
       // Direct-edit fast path: if the whole prompt is nothing but one supported
-      // exact chord edit, apply it locally and skip BOTH Groq calls. Requires an
-      // existing progression to edit; anything else (style clauses, mixed
-      // prompts, questions) fails the total-parse gate and falls through to Groq.
-      if (previousProgression && previousProgression.length > 0) {
-        const directEdits = parsePureDirectEdits(
-          normalizedPrompt,
-          previousProgression.length,
-        );
-        if (directEdits) {
-          handleDirectEditShortcut(
-            normalizedPrompt,
-            directEdits,
-            previousProgression,
+      // exact chord edit, apply it locally and skip BOTH Groq calls. Parse even
+      // before a progression exists so an impossible edit can fail locally.
+      const directEdits = parsePureDirectEdits(
+        normalizedPrompt,
+        previousProgression?.length ?? 4,
+      );
+      harmonyDebug("direct_edit_parse", {
+        prompt: normalizedPrompt,
+        matched: Boolean(directEdits),
+        fallbackReason: directEdits
+          ? null
+          : /\b(?:measure|chord|bar)\b/i.test(normalizedPrompt)
+            ? "exact-edit-like prompt did not match supported syntax"
+            : "prompt is not a pure exact edit",
+        actions: directEdits ?? [],
+      });
+      if (directEdits) {
+        if (!previousProgression || previousProgression.length === 0) {
+          pushAssistantMessage(
+            "There is no existing progression to edit. Generate one first.",
           );
           return;
         }
+        let request;
+        try {
+          request = directEditRequest(
+            directEdits,
+            previousProgression.length,
+          );
+        } catch (error) {
+          setAiError(
+            error instanceof Error
+              ? error.message
+              : "The exact edits conflict, so nothing was changed.",
+          );
+          return;
+        }
+        handleDirectEditShortcut(
+          normalizedPrompt,
+          request.intent === "direct_edit" ? request.actions : [],
+          previousProgression,
+        );
+        return;
+      }
+
+      if (
+        previousProgression &&
+        isSupportedFocusedHarmonyQuestion(normalizedPrompt) &&
+        answerFocusedQuestionLocally(normalizedPrompt)
+      ) {
+        setPendingClarification(null);
+        return;
       }
 
       const currentProgressionSummary = previousProgression
@@ -673,33 +854,66 @@ export default function Staff() {
       );
 
       if (!data || data.warning) {
+        harmonyDebug("interpretation_rejected", {
+          prompt: normalizedPrompt,
+          responseReceived: Boolean(data),
+          warning: data?.warning ?? null,
+        });
         setAiError(
           data?.warning ??
-            "AI interpretation was unavailable. A default progression was generated instead.",
+            "AI interpretation was unavailable. Nothing was changed.",
         );
-        if (previousProgression && previousProgression.length > 0) {
-          return;
-        }
-        handleGenerateNewProgression(normalizedPrompt);
         return;
       }
 
-      switch (data.intent) {
+      const request = normalizeHarmonyRequest({
+        response: data,
+        measureCount: previousProgression?.length ?? 4,
+        prompt: normalizedPrompt,
+      });
+      harmonyDebug("request_normalized", {
+        prompt: normalizedPrompt,
+        intent: request.intent,
+        actions: "actions" in request ? request.actions : [],
+      });
+
+      switch (request.intent) {
+        case "direct_edit":
+          if (!previousProgression || previousProgression.length === 0) {
+            pushAssistantMessage(
+              "There is no existing progression to edit. Generate one first.",
+            );
+            break;
+          }
+          handleDirectEditShortcut(
+            normalizedPrompt,
+            request.actions,
+            previousProgression,
+          );
+          break;
         case "generate_new":
-          handleGenerateNewProgression(normalizedPrompt, data);
+          handleGenerateNewProgression(
+            normalizedPrompt,
+            request.interpretation,
+          );
           break;
         case "revise_existing":
-          handleReviseExistingProgression(normalizedPrompt, data);
+          handleReviseExistingProgression(
+            normalizedPrompt,
+            request.interpretation,
+          );
           break;
         case "clarify":
-          handleClarification(data, normalizedPrompt);
+          handleClarification(request.question, normalizedPrompt);
           break;
         case "answer_question":
-          handleAnswerQuestion(data, normalizedPrompt);
+          handleAnswerQuestion(request.interpretation, normalizedPrompt);
           break;
       }
     } catch (error) {
-      console.error("generateProgression failed:", error);
+      harmonyDebugError("request_failed", error, {
+        prompt: normalizedPrompt,
+      });
       setAiError("Something went wrong while generating. Please try again.");
     } finally {
       setIsGenerating(false);
@@ -740,22 +954,27 @@ export default function Staff() {
       return;
     }
 
-    // Source of truth for any further revisions/edits.
-    lastProgressionRef.current = next;
-
-    // Re-voice the COMPLETE progression. Style mirrors what generation used:
-    // the interpreted primaryStyle, or the blank-prompt default.
-    const style = aiInterpretation?.primaryStyle ?? BLANK_PROMPT_STYLE;
+    // Re-voice the COMPLETE progression using the generation preferences.
     const preferences = aiInterpretation
       ? toGenerationPreferences(aiInterpretation)
       : toGenerationPreferences(DEFAULT_INTERPRETED_STYLE);
-    setChordMeasures(
-      voiceProgression(next, measures, getRenderedPitch, style, preferences),
+    commitProgressionState(
+      next,
+      voiceProgression(next, measures, getRenderedPitch, preferences),
+      {
+        explanationFacts: buildCandidateExplanationFacts({
+          progression: next,
+          activeKey: editedKey.label,
+          requestSummary: "Developer exact chord edit",
+          exactActions: [action],
+        }),
+      },
     );
     pushProgressionCard("Updated", editedKey.label, next);
     // We do NOT auto-request an explanation here: copied chords carry stale
     // positional score/reasons, so a grounded explanation would be misleading.
     setAiError(null);
+    setPendingStyleAlternative(null);
   }
 
   // Development-only: lets the copy_chord slice be exercised from the browser
@@ -815,36 +1034,34 @@ export default function Staff() {
   }
 
   function clearChords() {
-    setChordMeasures([[], [], [], []]);
     // Clear progression metadata so nothing is stale. The conversation log is
     // left intact so the history of the session stays readable.
-    setAiInterpretation(null);
+    clearHarmonyState();
     setPendingClarification(null);
-    lastProgressionRef.current = null;
+    setPendingStyleAlternative(null);
     pushAssistantMessage("Chord progression cleared.");
   }
 
   const hasNotes = measures.some((measure) => measure.length > 0);
   const hasProgression = chordMeasures.some((measure) => measure.length > 0);
+  const hasCommittedProgression =
+    candidateSet?.status === "previewing"
+      ? Boolean(candidateSet.baseProgression?.length)
+      : hasProgression;
 
   return (
     <div className="space-y-8">
       {/* Section 1: melody + chord staves and all note-entry controls */}
-      <section className="space-y-4">
+      <section className="max-w-full" style={{ width: EDITOR_PANEL_WIDTH }}>
         <HarmonyToolbar
-          bpm={bpm}
           generationMode={generationMode}
-          hasChords={hasProgression}
           hasNotes={hasNotes}
           keySignature={keySignature}
           onAccidentalClick={handleAccidentalClick}
-          onBpmChange={setBpm}
-          onClearChords={clearChords}
           onClearMelody={clearAllMeasures}
           onDeleteLast={deleteLastNote}
           onGenerationModeChange={handleGenerationModeChange}
           onKeySignatureChange={handleKeySignatureChange}
-          onPlay={playMeasures}
           onSelectNote={(duration) => {
             setSelectedKind("note");
             setSelectedDuration(duration);
@@ -860,41 +1077,68 @@ export default function Staff() {
         />
 
         {/* Staff */}
-        <div className="overflow-x-auto border-y border-[var(--border)] bg-[var(--surface)]">
+        <div className="flex w-fit max-w-full items-stretch">
           <div
-            ref={staffWrapperRef}
-            onClick={handleStaffClick}
-            className="cursor-crosshair"
-            style={{
-              width: rendererWidth,
-              height: rendererHeight,
-              position: "relative",
-            }}
+            className="min-w-0 shrink overflow-x-auto border border-[var(--border)] bg-[var(--surface)] p-2"
+            style={{ width: STAFF_FRAME_WIDTH }}
           >
-            <StaffRenderer
-              bottomStaffLineYRef={bottomStaffLineYRef}
-              chordMeasures={chordMeasures}
-              geometry={geometry}
-              keySignature={keySignature}
-              measures={measures}
-              topStaffLineYRef={topStaffLineYRef}
-            />
+            <div
+              ref={staffWrapperRef}
+              onClick={handleStaffClick}
+              className="cursor-crosshair"
+              style={{
+                width: rendererWidth,
+                height: rendererHeight,
+                position: "relative",
+              }}
+            >
+              <StaffRenderer
+                bottomStaffLineYRef={bottomStaffLineYRef}
+                chordMeasures={chordMeasures}
+                geometry={geometry}
+                keySignature={keySignature}
+                measures={measures}
+                topStaffLineYRef={topStaffLineYRef}
+              />
+            </div>
           </div>
+          <HarmonyPlaybackPanel
+            bpm={bpm}
+            hasChords={hasProgression}
+            onBpmChange={setBpm}
+            onClearChords={clearChords}
+            onPlay={playMeasures}
+          />
         </div>
       </section>
 
-      <HarmonyChat
-        composerValue={stylePrompt}
-        error={aiError}
-        hasProgression={hasProgression}
-        helperText={PROMPT_HELPER_TEXT}
-        isExplaining={isExplaining}
-        isGenerating={isGenerating}
-        messages={messages}
-        onComposerChange={setStylePrompt}
-        onSubmit={handleGenerateProgression}
-        placeholder={hasProgression ? REVISION_PLACEHOLDER : FRESH_PLACEHOLDER}
-      />
+      <section
+        className="max-w-full border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
+        style={{ width: EDITOR_PANEL_WIDTH }}
+      >
+        <h2 className="mb-2 pl-2 text-sm font-semibold tracking-[-0.01em] text-[var(--text)]">
+          Chord Chat
+        </h2>
+        <HarmonyChat
+          candidatePreview={candidateSet}
+          composerValue={stylePrompt}
+          error={aiError}
+          hasProgression={hasCommittedProgression}
+          helperText={PROMPT_HELPER_TEXT}
+          isExplaining={isExplaining}
+          isGenerating={isGenerating}
+          messages={messages}
+          onCancelCandidate={handleCandidateCancellation}
+          onComposerChange={setStylePrompt}
+          onPreviewCandidate={handlePreviewCandidate}
+          onSelectCandidate={handleCandidateSelection}
+          onExplainCandidate={handleExplainCandidate}
+          onSubmit={handleGenerateProgression}
+          placeholder={
+            hasProgression ? REVISION_PLACEHOLDER : FRESH_PLACEHOLDER
+          }
+        />
+      </section>
     </div>
   );
 }

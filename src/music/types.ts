@@ -22,7 +22,8 @@ export type PlacedChord = {
 
 export type KeyMode = "major" | "minor";
 export type GenerationMode = "automatic" | KeyMode;
-export type StyleOption = "simple" | "jazzy" | "bluesy" | "descendingBass";
+export type StyleOption = "simple" | "jazzy";
+export type StyleIntensity = 0 | 1 | 2 | 3;
 
 export type KeyContext = {
   signature: string;
@@ -83,6 +84,9 @@ export type GenerationPreferences = {
   preferSuspensions: boolean;
   voiceLeadingPriority: number;
   playabilityRequired: boolean;
+  simplicityLevel?: StyleIntensity;
+  jazzLevel?: StyleIntensity;
+  styleTransform?: StyleOption;
 };
 
 export type HarmonyPreferences = GenerationPreferences;
