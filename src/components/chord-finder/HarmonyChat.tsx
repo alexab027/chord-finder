@@ -88,18 +88,15 @@ function TextMessage({
     <article
       className={
         isUser
-          ? "bg-[var(--surface-subtle)] px-4 py-3"
-          : "bg-[var(--surface)] px-4 py-4"
+          ? "ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-[var(--surface-subtle)] px-4 py-3"
+          : "mr-auto max-w-[85%] rounded-2xl rounded-bl-md bg-[var(--surface)] px-4 py-3"
       }
     >
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-        {isUser ? "You" : "Harmony"}
-      </div>
       <p
         className={
           isUser
-            ? "mt-1 whitespace-pre-wrap text-sm text-[var(--text)]"
-            : "mt-1 whitespace-pre-wrap text-sm text-[var(--text-muted)]"
+            ? "whitespace-pre-wrap text-sm text-[var(--text)]"
+            : "whitespace-pre-wrap text-sm text-[var(--text-muted)]"
         }
       >
         {text}
@@ -116,7 +113,7 @@ function ProgressionMessage({
   items: CurrentProgressionItem[];
 }) {
   return (
-    <article className="space-y-3 bg-[var(--surface)] px-4 py-4">
+    <article className="mr-auto w-full max-w-[90%] space-y-3 rounded-2xl rounded-bl-md bg-[var(--surface)] px-4 py-4">
       <div className="border-l-2 border-[var(--accent)] pl-3">
         <div className="font-semibold text-[var(--text)]">{heading}</div>
         <dl className="mt-2 grid gap-1 text-sm text-[var(--text-muted)]">
@@ -142,7 +139,7 @@ function ExplanationMessage({
   measures: Array<{ measure: number; chord: string; explanation: string }>;
 }) {
   return (
-    <article className="space-y-3 bg-[var(--surface)] px-4 py-4">
+    <article className="mr-auto w-full max-w-[90%] space-y-3 rounded-2xl rounded-bl-md bg-[var(--surface)] px-4 py-4">
       <div className="space-y-2 text-sm">
         {overview && <p className="text-[var(--text-muted)]">{overview}</p>}
         {measures.length > 0 && (
@@ -185,7 +182,7 @@ function CandidateMessage({
     candidatePreview?.status === "previewing" && !isCurrentSet;
 
   return (
-    <article className="space-y-3 bg-[var(--surface)] px-4 py-4">
+    <article className="mr-auto w-full max-w-[90%] space-y-3 rounded-2xl rounded-bl-md bg-[var(--surface)] px-4 py-4">
       <div className="font-semibold text-[var(--text)]">
         Choose a progression
       </div>
@@ -314,6 +311,7 @@ export default function HarmonyChat({
   onCancelCandidate,
 }: HarmonyChatProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const [blockedCandidateSetId, setBlockedCandidateSetId] = useState<
     string | null
   >(null);
@@ -324,6 +322,15 @@ export default function HarmonyChat({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isExplaining]);
+
+  useEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) return;
+    composer.style.height = "auto";
+    const nextHeight = Math.min(composer.scrollHeight, 160);
+    composer.style.height = `${nextHeight}px`;
+    composer.style.overflowY = composer.scrollHeight > 160 ? "auto" : "hidden";
+  }, [composerValue]);
 
   function attemptSubmit() {
     const block = getComposerSubmissionBlock({
@@ -354,22 +361,13 @@ export default function HarmonyChat({
 
   return (
     <section className="w-full border-y border-[var(--border)] bg-[var(--surface)]">
-      <header className="border-b border-[var(--border)] px-4 py-3">
-        <h2 className="text-sm font-semibold text-[var(--text)]">
-          Harmony conversation
-        </h2>
-        <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-          Generate a progression, ask a question, or request a revision.
-        </p>
-      </header>
-
       <div className="max-h-[28rem] overflow-y-auto">
         {messages.length === 0 && !isExplaining ? (
           <div className="px-4 py-8 text-sm text-[var(--text-muted)]">
             Your harmony requests and explanations will appear here.
           </div>
         ) : (
-          <div className="divide-y divide-[var(--border)]">
+          <div className="space-y-3 p-4">
             {messages.map((message) => (
               <ChatEntry
                 candidatePreview={candidatePreview}
@@ -382,7 +380,7 @@ export default function HarmonyChat({
               />
             ))}
             {isExplaining && (
-              <article className="bg-[var(--surface)] px-4 py-4">
+              <article className="mr-auto max-w-[85%] rounded-2xl rounded-bl-md bg-[var(--surface)] px-4 py-3">
                 <p className="text-sm text-[var(--text-muted)]">Explaining…</p>
               </article>
             )}
@@ -393,20 +391,19 @@ export default function HarmonyChat({
 
       <div className="border-t border-[var(--border)] bg-[var(--surface)] p-4">
         <label className="flex flex-col gap-1">
-          <span className="text-sm font-semibold text-[var(--text)]">
-            Describe the harmony you want
-          </span>
+          <span className="sr-only">Message</span>
           <span className="text-xs leading-5 text-[var(--text-muted)]">
             {helperText}
           </span>
           <div className="relative mt-1">
             <textarea
-              className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2 pr-14 text-sm text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
+              ref={composerRef}
+              className="block min-h-10 max-h-40 w-full resize-none overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2.5 pr-14 text-sm leading-5 text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
               maxLength={500}
               onChange={(event) => onComposerChange(event.target.value)}
               onKeyDown={handleComposerKeyDown}
               placeholder={placeholder}
-              rows={3}
+              rows={1}
               value={composerValue}
             />
             <button

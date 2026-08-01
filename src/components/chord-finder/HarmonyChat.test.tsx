@@ -246,6 +246,44 @@ describe("HarmonyChat candidate controls", () => {
     expect(markup).not.toContain("In plain English");
   });
 
+  it("renders a normal left/right conversation without speaker-name labels", () => {
+    const markup = renderToStaticMarkup(
+      <HarmonyChat
+        candidatePreview={null}
+        composerValue="one line"
+        error={null}
+        hasProgression
+        helperText="Helper"
+        isExplaining={false}
+        isGenerating={false}
+        messages={[
+          { id: "user", kind: "text", role: "user", text: "Make it warm" },
+          {
+            id: "assistant",
+            kind: "text",
+            role: "assistant",
+            text: "Here are some options.",
+          },
+        ]}
+        onCancelCandidate={noOp}
+        onComposerChange={noOp}
+        onExplainCandidate={noOp}
+        onPreviewCandidate={noOp}
+        onSelectCandidate={noOp}
+        onSubmit={noOp}
+        placeholder="Describe harmony"
+      />,
+    );
+
+    expect(markup).toContain("ml-auto max-w-[85%]");
+    expect(markup).toContain("mr-auto max-w-[85%]");
+    expect(markup).not.toContain(">You<");
+    expect(markup).not.toContain(">Harmony<");
+    expect(markup).not.toContain("Harmony conversation");
+    expect(markup).toContain('rows="1"');
+    expect(markup).toContain("resize-none");
+  });
+
   it("disables old options while a newer preview transaction is open", () => {
     const markup = renderToStaticMarkup(
       <HarmonyChat
