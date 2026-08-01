@@ -88,15 +88,15 @@ function TextMessage({
     <article
       className={
         isUser
-          ? "ml-auto max-w-[75%] rounded-2xl rounded-br-md bg-[color-mix(in_srgb,var(--accent)_9%,white)] px-4 py-3"
-          : "mr-auto max-w-[75%] rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3"
+          ? "ml-auto w-fit max-w-[75%] rounded-2xl rounded-br-md bg-[color-mix(in_srgb,var(--accent)_28%,var(--surface))] px-4 py-3"
+          : "mr-auto w-fit max-w-[75%] rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3"
       }
     >
       <p
         className={
           isUser
-            ? "whitespace-pre-wrap text-sm text-[var(--text)]"
-            : "whitespace-pre-wrap text-sm text-[var(--text-muted)]"
+            ? "break-words whitespace-pre-wrap text-sm text-[var(--text)]"
+            : "break-words whitespace-pre-wrap text-sm text-[var(--text-muted)]"
         }
       >
         {text}
@@ -113,7 +113,7 @@ function ProgressionMessage({
   items: CurrentProgressionItem[];
 }) {
   return (
-    <article className="mr-auto w-full max-w-[75%] space-y-3 rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-4">
+    <article className="mr-auto w-fit max-w-[75%] space-y-3 rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-4">
       <div className="border-l-2 border-[var(--accent)] pl-3">
         <div className="font-semibold text-[var(--text)]">{heading}</div>
         <dl className="mt-2 grid gap-1 text-sm text-[var(--text-muted)]">
@@ -139,7 +139,7 @@ function ExplanationMessage({
   measures: Array<{ measure: number; chord: string; explanation: string }>;
 }) {
   return (
-    <article className="mr-auto w-full max-w-[75%] space-y-3 rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-4">
+    <article className="mr-auto w-fit max-w-[75%] space-y-3 rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-4">
       <div className="space-y-2 text-sm">
         {overview && <p className="text-[var(--text-muted)]">{overview}</p>}
         {measures.length > 0 && (
@@ -182,7 +182,7 @@ function CandidateMessage({
     candidatePreview?.status === "previewing" && !isCurrentSet;
 
   return (
-    <article className="mr-auto w-full max-w-[75%] space-y-3 rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-4">
+    <article className="mr-auto w-fit max-w-[75%] space-y-3 rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-4">
       <div className="font-semibold text-[var(--text)]">
         Choose a progression
       </div>
@@ -198,7 +198,7 @@ function CandidateMessage({
               aria-pressed={isPreviewed}
               className={
                 isPreviewed
-                  ? "w-80 shrink-0 rounded-md border border-[var(--accent-border)] bg-[color-mix(in_srgb,var(--accent)_10%,white)] px-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
+                  ? "w-80 shrink-0 rounded-md border border-[var(--accent-border)] bg-[color-mix(in_srgb,var(--accent)_22%,var(--surface))] px-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
                   : "w-80 shrink-0 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-3 text-left hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
               }
               disabled={anotherSetIsPreviewing}
@@ -360,8 +360,8 @@ export default function HarmonyChat({
   }
 
   return (
-    <section className="w-full border-y border-[var(--border)] bg-[var(--surface)]">
-      <div className="max-h-[28rem] overflow-y-auto">
+    <section className="harmony-chat w-full border-y border-[var(--border)] bg-[var(--chat-background)]">
+      <div className="max-h-[22.4rem] overflow-y-auto">
         {messages.length === 0 && !isExplaining ? (
           <div className="px-4 py-8 text-sm text-[var(--text-muted)]">
             Your harmony requests and explanations will appear here.
@@ -380,7 +380,7 @@ export default function HarmonyChat({
               />
             ))}
             {isExplaining && (
-              <article className="mr-auto max-w-[75%] rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3">
+              <article className="mr-auto w-fit max-w-[75%] rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3">
                 <p className="text-sm text-[var(--text-muted)]">Explaining…</p>
               </article>
             )}
@@ -389,13 +389,10 @@ export default function HarmonyChat({
         )}
       </div>
 
-      <div className="border-t border-[var(--border)] bg-[var(--surface)] p-4">
+      <div className="border-t border-[var(--border)] bg-[var(--page)] p-4">
         <label className="flex flex-col gap-1">
           <span className="sr-only">Message</span>
-          <span className="text-xs leading-5 text-[var(--text-muted)]">
-            {helperText}
-          </span>
-          <div className="relative mt-1">
+          <div className="relative">
             <textarea
               ref={composerRef}
               className="block min-h-10 max-h-40 w-full resize-none overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2.5 pr-14 text-sm leading-5 text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
@@ -411,7 +408,7 @@ export default function HarmonyChat({
               aria-label="Send harmony request"
               className={
                 isGenerating
-                  ? "absolute bottom-1 right-1 flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-full border border-[var(--border)] bg-[#ecece8] text-lg font-semibold leading-none text-[var(--text-muted)]"
+                  ? "absolute bottom-1 right-1 flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface-subtle)] text-lg font-semibold leading-none text-[var(--text-muted)]"
                   : "absolute bottom-1 right-1 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--accent-border)] bg-[var(--accent)] text-lg font-semibold leading-none text-white hover:bg-[var(--accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
               }
               disabled={isGenerating}
@@ -422,6 +419,9 @@ export default function HarmonyChat({
               {isGenerating ? "…" : "↑"}
             </button>
           </div>
+          <span className="text-xs leading-5 text-[var(--text-muted)]">
+            {helperText}
+          </span>
         </label>
 
         {previewSubmitWarning && (

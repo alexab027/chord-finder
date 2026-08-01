@@ -102,6 +102,11 @@ describe("HarmonyChat candidate controls", () => {
     expect(markup).toContain(">Why this option?</button>");
     expect(markup).toContain(">Cancel</button>");
     expect(markup).toContain('aria-label="Send harmony request"');
+    expect(markup).toContain('class="max-h-[22.4rem] overflow-y-auto"');
+    expect(markup).toContain("bg-[var(--chat-background)]");
+    expect(markup.indexOf('aria-label="Send harmony request"')).toBeLessThan(
+      markup.indexOf("Helper"),
+    );
     expect(markup).not.toContain("Preview each option");
     expect(markup).not.toContain("Choose an option to open a fresh preview");
     expect(markup).not.toContain("Choose an option above.");
@@ -275,8 +280,8 @@ describe("HarmonyChat candidate controls", () => {
       />,
     );
 
-    expect(markup).toContain("ml-auto max-w-[75%]");
-    expect(markup).toContain("mr-auto max-w-[75%]");
+    expect(markup).toContain("ml-auto w-fit max-w-[75%]");
+    expect(markup).toContain("mr-auto w-fit max-w-[75%]");
     expect(markup).not.toContain(">You<");
     expect(markup).not.toContain(">Harmony<");
     expect(markup).not.toContain("Harmony conversation");
