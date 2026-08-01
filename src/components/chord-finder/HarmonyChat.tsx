@@ -411,8 +411,8 @@ export default function HarmonyChat({
               aria-label="Send harmony request"
               className={
                 isGenerating
-                  ? "absolute bottom-2 right-2 flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-md border border-[var(--border)] bg-[#ecece8] text-lg font-semibold text-[var(--text-muted)]"
-                  : "absolute bottom-2 right-2 flex h-9 w-9 items-center justify-center rounded-md border border-[var(--accent-border)] bg-[var(--accent)] text-lg font-semibold text-white hover:bg-[var(--accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
+                  ? "absolute bottom-1 right-1 flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-full border border-[var(--border)] bg-[#ecece8] text-lg font-semibold leading-none text-[var(--text-muted)]"
+                  : "absolute bottom-1 right-1 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--accent-border)] bg-[var(--accent)] text-lg font-semibold leading-none text-white hover:bg-[var(--accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
               }
               disabled={isGenerating}
               onClick={attemptSubmit}

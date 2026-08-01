@@ -282,6 +282,8 @@ describe("HarmonyChat candidate controls", () => {
     expect(markup).not.toContain("Harmony conversation");
     expect(markup).toContain('rows="1"');
     expect(markup).toContain("resize-none");
+    expect(markup).toContain("h-8 w-8");
+    expect(markup).toContain("rounded-full");
   });
 
   it("disables old options while a newer preview transaction is open", () => {
