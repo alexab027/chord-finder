@@ -16,6 +16,13 @@ Chord Finder is an interactive harmony tool for turning a short melody into a pl
 - Ask for grounded progression, measure, transition, and candidate explanations based on deterministic musical facts.
 - View chord symbols and Roman numerals alongside VexFlow notation, then play the melody and chords together at an adjustable tempo.
 
+## Architecture
+
+Chord Finder uses Groq to interpret language while a deterministic TypeScript
+engine owns chord generation, scoring, validation, voicing, and state changes.
+
+See [Architecture](docs/architecture.md) for the full system design.
+
 ## Getting Started
 
 ```bash
