@@ -1,5 +1,5 @@
 {
-  "name": "music-copilot",
+  "name": "chord-finder",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run lint && npm run typecheck && npm run build && npm run test"
   },
   "dependencies": {
     "groq-sdk": "^1.3.0",
