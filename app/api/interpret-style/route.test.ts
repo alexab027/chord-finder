@@ -1,8 +1,47 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GroqHarmonyRouterOutput } from "@/src/ai/harmonyRouterSchema";
 
-const { createCompletionMock } = vi.hoisted(() => ({
+const { checkGroqRateLimitMock, createCompletionMock } = vi.hoisted(() => ({
+  checkGroqRateLimitMock: vi.fn(),
   createCompletionMock: vi.fn(),
+}));
+
+vi.mock("@/src/server/rateLimit", () => ({
+  checkGroqRateLimit: checkGroqRateLimitMock,
+  groqRateLimitResponse: (decision: {
+    status: number;
+    code: string;
+    retryAfterSeconds?: number;
+  }) =>
+    Response.json(
+      {
+        error: "Too many AI requests.",
+        code: decision.code,
+        ...(decision.retryAfterSeconds
+          ? { retryAfterSeconds: decision.retryAfterSeconds }
+          : {}),
+      },
+      {
+        status: decision.status,
+        ...(decision.retryAfterSeconds
+          ? { headers: { "Retry-After": String(decision.retryAfterSeconds) } }
+          : {}),
+      },
+    ),
+  isGroqProviderRateLimit: (error: unknown) =>
+    !!error &&
+    typeof error === "object" &&
+    "status" in error &&
+    error.status === 429,
+  groqProviderRateLimitResponse: () =>
+    Response.json(
+      {
+        error: "The AI provider is temporarily rate limited.",
+        code: "provider_rate_limited",
+        retryAfterSeconds: 17,
+      },
+      { status: 429, headers: { "Retry-After": "17" } },
+    ),
 }));
 
 vi.mock("groq-sdk", () => ({
@@ -50,22 +89,31 @@ const baseGroqOutput: GroqHarmonyRouterOutput = {
 };
 
 afterEach(() => {
+  checkGroqRateLimitMock.mockReset();
+  checkGroqRateLimitMock.mockResolvedValue({ allowed: true, enforced: true });
   createCompletionMock.mockReset();
   if (originalGroqApiKey === undefined) delete process.env.GROQ_API_KEY;
   else process.env.GROQ_API_KEY = originalGroqApiKey;
   if (originalGroqModel === undefined) delete process.env.GROQ_MODEL;
   else process.env.GROQ_MODEL = originalGroqModel;
+  vi.restoreAllMocks();
 });
 
+checkGroqRateLimitMock.mockResolvedValue({ allowed: true, enforced: true });
+
 async function postInterpretation(body: Record<string, unknown>) {
-  const response = await POST(
+  const response = await postInterpretationResponse(body);
+  return response.json();
+}
+
+async function postInterpretationResponse(body: Record<string, unknown>) {
+  return POST(
     new Request("http://localhost/api/interpret-style", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }),
   );
-  return response.json();
 }
 
 async function interpret(message: string) {
@@ -515,5 +563,126 @@ describe("explicit named-chord edits", () => {
     expect(result.actions).toEqual([]);
     expect(result.clarificationQuestion).toMatch(/not supported/i);
     expect(createCompletionMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("Groq rate-limit boundary", () => {
+  it("checks quota only when the route is about to call Groq", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+
+    await postInterpretation({ message: "" });
+    await postInterpretation({ message: "x".repeat(501) });
+    await postInterpretation({
+      message: "add a Dm7 in measure 2",
+      hasProgression: true,
+      currentProgression,
+    });
+
+    expect(checkGroqRateLimitMock).not.toHaveBeenCalled();
+    expect(createCompletionMock).not.toHaveBeenCalled();
+
+    createCompletionMock.mockResolvedValueOnce({
+      choices: [{ message: { content: JSON.stringify(baseGroqOutput) } }],
+    });
+    await postInterpretation({ message: "make it warm" });
+
+    expect(checkGroqRateLimitMock).toHaveBeenCalledTimes(1);
+    expect(createCompletionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 429 with retry metadata without contacting Groq", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    checkGroqRateLimitMock.mockResolvedValueOnce({
+      allowed: false,
+      code: "rate_limit_exceeded",
+      status: 429,
+      retryAfterSeconds: 23,
+    });
+
+    const response = await postInterpretationResponse({
+      message: "make it warm",
+    });
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("23");
+    await expect(response.json()).resolves.toMatchObject({
+      code: "rate_limit_exceeded",
+      retryAfterSeconds: 23,
+    });
+    expect(createCompletionMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps deterministic edits available when AI quota is exhausted", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    checkGroqRateLimitMock.mockResolvedValue({
+      allowed: false,
+      code: "rate_limit_exceeded",
+      status: 429,
+      retryAfterSeconds: 23,
+    });
+
+    const result = await postInterpretation({
+      message: "add a Dm7 in measure 2",
+      hasProgression: true,
+      currentProgression,
+    });
+
+    expect(result).toMatchObject({
+      intent: "revise_existing",
+      actions: [{ type: "replace_chord", measure: 2, chordName: "Dm7" }],
+    });
+    expect(checkGroqRateLimitMock).not.toHaveBeenCalled();
+    expect(createCompletionMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 without contacting Groq when limiting is unavailable", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    checkGroqRateLimitMock.mockResolvedValueOnce({
+      allowed: false,
+      code: "rate_limit_unavailable",
+      status: 503,
+    });
+
+    const response = await postInterpretationResponse({
+      message: "make it warm",
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "rate_limit_unavailable",
+    });
+    expect(createCompletionMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves a Groq provider 429", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    createCompletionMock.mockRejectedValueOnce({ status: 429 });
+
+    const response = await postInterpretationResponse({
+      message: "make it warm",
+    });
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("17");
+    await expect(response.json()).resolves.toMatchObject({
+      code: "provider_rate_limited",
+      retryAfterSeconds: 17,
+    });
+  });
+
+  it("does not log raw prompts when a provider request fails", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    const rawPrompt = "private harmony prompt";
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    createCompletionMock.mockRejectedValueOnce(
+      new Error(`provider rejected ${rawPrompt}`),
+    );
+
+    await postInterpretation({ message: rawPrompt });
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      "interpret-style: Groq request failed.",
+    );
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(rawPrompt);
   });
 });

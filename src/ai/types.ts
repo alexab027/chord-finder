@@ -17,6 +17,15 @@ export type PendingClarification = {
   possibleIntents?: HarmonyIntent[];
 };
 
+export type AiApiErrorResponse = {
+  error: string;
+  code:
+    | "rate_limit_exceeded"
+    | "rate_limit_unavailable"
+    | "provider_rate_limited";
+  retryAfterSeconds?: number;
+};
+
 export type InterpretedStyle = {
   primaryStyle: StyleOption;
   melodyFitPriority: number;

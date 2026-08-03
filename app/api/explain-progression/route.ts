@@ -1,4 +1,10 @@
 import Groq from "groq-sdk";
+import {
+  checkGroqRateLimit,
+  groqProviderRateLimitResponse,
+  groqRateLimitResponse,
+  isGroqProviderRateLimit,
+} from "@/src/server/rateLimit";
 
 const MAX_KEY_LENGTH = 40;
 const MAX_STYLE_REQUEST_LENGTH = 500;
@@ -103,21 +109,22 @@ function mentionsDifferentKey(text: string, activeKey: string) {
   const keyPattern = /\b[A-G](?:#|b)?\s+(?:major|minor)\b/g;
   return [...text.matchAll(keyPattern)].some(
     ([keyLabel]) =>
-      normalizeKeyLabel(keyLabel).toLowerCase() !== normalizedActiveKey
+      normalizeKeyLabel(keyLabel).toLowerCase() !== normalizedActiveKey,
   );
 }
 
 function hasExplicitKeyFitReason(item: ProgressionItem, activeKey: string) {
-  const fitReason = `fits the key of ${normalizeKeyLabel(activeKey)}`.toLowerCase();
-  return item.reasons.some(
-    (reason) => normalizeKeyLabel(reason).toLowerCase().includes(fitReason)
+  const fitReason =
+    `fits the key of ${normalizeKeyLabel(activeKey)}`.toLowerCase();
+  return item.reasons.some((reason) =>
+    normalizeKeyLabel(reason).toLowerCase().includes(fitReason),
   );
 }
 
 function mentionsUnsupportedFitClaim(
   text: string,
   item: ProgressionItem,
-  activeKey: string
+  activeKey: string,
 ) {
   return (
     /\bfits?\s+(?:the\s+)?key\b/i.test(text) &&
@@ -127,33 +134,33 @@ function mentionsUnsupportedFitClaim(
 
 function hasFinalVoicedBassReason(item: ProgressionItem) {
   return item.reasons.some((reason) =>
-    /\bfinal voiced bass moves downward\b/i.test(reason)
+    /\bfinal voiced bass moves downward\b/i.test(reason),
   );
 }
 
 function mentionsDescendingBassClaim(text: string) {
   return /\b(descending bass|bass line descends|bass descends|bass moves downward|downward bass motion)\b/i.test(
-    text
+    text,
   );
 }
 
 function mentionsUnsupportedDescendingBassClaim(
   text: string,
-  item: ProgressionItem
+  item: ProgressionItem,
 ) {
   return mentionsDescendingBassClaim(text) && !hasFinalVoicedBassReason(item);
 }
 
 function neutralMeasureExplanation(item: ProgressionItem, activeKey: string) {
   const actionReason = item.reasons.find((reason) =>
-    /\b(copied|set to|by request|preserves|keeps)\b/i.test(reason)
+    /\b(copied|set to|by request|preserves|keeps)\b/i.test(reason),
   );
   if (actionReason) {
     return `${item.symbol} is the final chord for measure ${item.measure} in ${normalizeKeyLabel(activeKey)}. ${actionReason}.`;
   }
 
   const melodyReason = item.reasons.find((reason) =>
-    /\bmelody note|melody notes\b/i.test(reason)
+    /\bmelody note|melody notes\b/i.test(reason),
   );
   if (melodyReason) {
     return `${item.symbol} is the final chord for measure ${item.measure} in ${normalizeKeyLabel(activeKey)}. ${melodyReason}.`;
@@ -178,14 +185,14 @@ function mentionsWrongSuspension(text: string, symbol: string) {
   if (!suspension) return false;
 
   return [...text.matchAll(/\bsus(?:2|4)?\b/gi)].some(
-    ([label]) => label.toLowerCase() !== suspension
+    ([label]) => label.toLowerCase() !== suspension,
   );
 }
 
 function sanitizeExplanationText(
   text: string,
   item: ProgressionItem,
-  activeKey: string
+  activeKey: string,
 ) {
   if (
     mentionsDifferentKey(text, activeKey) ||
@@ -202,7 +209,7 @@ function sanitizeExplanationText(
 function sanitizeOverviewText(
   text: string,
   activeKey: string,
-  progression: ProgressionItem[]
+  progression: ProgressionItem[],
 ) {
   const hasStrictDescendingBassEvidence =
     progression.length > 1 &&
@@ -224,14 +231,16 @@ function assertExplanationSanitizer() {
   const sanitized = sanitizeExplanationText(
     "Measure 1 fits the key of A major and uses sus4 color.",
     item,
-    "A minor"
+    "A minor",
   );
 
   if (
     sanitized !==
     "IVsus2 is the final chord for measure 1 in A minor. The available deterministic data does not add more theory detail for this measure."
   ) {
-    throw new Error("Explanation sanitizer failed to ground active key/suspension.");
+    throw new Error(
+      "Explanation sanitizer failed to ground active key/suspension.",
+    );
   }
 }
 
@@ -270,8 +279,16 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: "Explanation service is not configured." }, 503);
   }
 
-  const model = process.env.GROQ_MODEL ?? "llama-3.1-8b-instant";
+  const model = process.env.GROQ_MODEL;
 
+  if (!model) {
+    console.error("GROQ_MODEL is not configured.");
+
+    return Response.json(
+      { error: "AI service is not configured." },
+      { status: 503 },
+    );
+  }
   // Only grounded facts produced by the engine are sent to Groq.
   const payload = {
     activeKey: normalizeKeyLabel(activeKey),
@@ -282,13 +299,14 @@ export async function POST(request: Request): Promise<Response> {
   };
 
   try {
-    // Fail fast into the graceful fallback below rather than hanging. The SDK
-    // defaults (maxRetries 2 + a long timeout) can turn one slow/rate-limited
-    // call into 20s+ of backoff.
+    const rateLimit = await checkGroqRateLimit(request);
+    if (!rateLimit.allowed) return groqRateLimitResponse(rateLimit);
+
+    // Keep one admitted quota unit to one provider attempt and fail promptly.
     const groq = new Groq({
       apiKey: process.env.GROQ_API_KEY,
       timeout: 10_000,
-      maxRetries: 1,
+      maxRetries: 0,
     });
 
     const completion = await groq.chat.completions.create({
@@ -321,7 +339,7 @@ export async function POST(request: Request): Promise<Response> {
         if (typeof item.measure === "number") {
           explanationByMeasure.set(
             item.measure,
-            asString(item.explanation, MAX_EXPLANATION_LENGTH)
+            asString(item.explanation, MAX_EXPLANATION_LENGTH),
           );
         }
       }
@@ -331,7 +349,7 @@ export async function POST(request: Request): Promise<Response> {
       overview: sanitizeOverviewText(
         asString(parsed.overview, MAX_OVERVIEW_LENGTH),
         activeKey,
-        progression
+        progression,
       ),
       measures: progression.map((item) => ({
         measure: item.measure,
@@ -339,17 +357,18 @@ export async function POST(request: Request): Promise<Response> {
         explanation: sanitizeExplanationText(
           explanationByMeasure.get(item.measure) ?? "",
           item,
-          activeKey
+          activeKey,
         ),
       })),
     };
 
     return json(response);
   } catch (error) {
-    console.error(
-      "explain-progression: Groq request failed:",
-      error instanceof Error ? error.message : "unknown error"
-    );
+    if (isGroqProviderRateLimit(error)) {
+      return groqProviderRateLimitResponse(error);
+    }
+
+    console.error("explain-progression: Groq request failed.");
     return json({ error: "Explanation was unavailable." }, 502);
   }
 }

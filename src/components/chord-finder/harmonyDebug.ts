@@ -42,7 +42,7 @@ export function harmonyDebugError(
   if (process.env.NODE_ENV !== "development") return;
   const errorDetails = {
     ...details,
-    error: error instanceof Error ? error.message : String(error),
+    errorType: error instanceof Error ? error.name : typeof error,
   };
   recordDebugEntry(event, errorDetails);
   console.error(`[harmony-debug] ${event}`, errorDetails);
