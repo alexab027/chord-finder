@@ -302,9 +302,7 @@ export async function POST(request: Request): Promise<Response> {
     const rateLimit = await checkGroqRateLimit(request);
     if (!rateLimit.allowed) return groqRateLimitResponse(rateLimit);
 
-    // Fail fast into the graceful fallback below rather than hanging. The SDK
-    // Do not retry a paid request behind the per-IP quota: one admitted request
-    // must produce at most one provider call.
+    // Keep one admitted quota unit to one provider attempt and fail promptly.
     const groq = new Groq({
       apiKey: process.env.GROQ_API_KEY,
       timeout: 10_000,

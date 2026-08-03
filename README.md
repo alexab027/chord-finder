@@ -32,11 +32,11 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-Best-fit generation works locally without an AI service. To enable natural-language requests, revisions, and explanations, add a Groq API key to `.env.local`:
+Best-fit generation works locally without an AI service. To enable natural-language requests, revisions, and explanations, add a Groq API key and model to `.env.local`:
 
 ```env
 GROQ_API_KEY=your_api_key
-# Optional shared model override
+# Required shared model for interpretation and explanations
 GROQ_MODEL=openai/gpt-oss-20b
 
 # Required in production before Groq-backed requests are allowed
@@ -45,7 +45,7 @@ UPSTASH_REDIS_REST_TOKEN=your_upstash_redis_rest_token
 RATE_LIMIT_SALT=a_long_random_secret
 ```
 
-The request interpreter defaults to Groq-hosted `openai/gpt-oss-20b` and returns a strict typed schema. Setting `GROQ_MODEL` applies the same model override to interpretation and explanations. The model does not choose or generate chords: candidate generation, scoring, validation, exact edits, previews, and style-boundary checks remain inside the deterministic music engine.
+Both AI routes use the Groq-hosted model configured by `GROQ_MODEL`. The request interpreter returns a strict typed schema, and the model does not choose or generate chords: candidate generation, scoring, validation, exact edits, previews, and style-boundary checks remain inside the deterministic music engine.
 
 The Upstash settings enforce shared per-IP limits across both Groq routes. Tests
 and ordinary local development bypass rate limiting when those settings are
