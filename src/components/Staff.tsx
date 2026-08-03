@@ -66,6 +66,7 @@ import {
 } from "./chord-finder/explanationRequest";
 import {
   DEFAULT_INTERPRETED_STYLE,
+  type AiApiErrorResponse,
   type HarmonyRouterResponse,
   type InterpretedStyle,
   type PendingClarification,
@@ -103,6 +104,34 @@ const FRESH_PLACEHOLDER =
 
 const REVISION_PLACEHOLDER =
   "Example: Keep this progression but make it slightly more complex";
+
+function aiRequestFailureMessage(
+  response: Response,
+  error: AiApiErrorResponse | null,
+  fallback: string,
+) {
+  if (response.status === 429) {
+    const retryAfter =
+      typeof error?.retryAfterSeconds === "number"
+        ? Math.max(1, Math.ceil(error.retryAfterSeconds))
+        : 60;
+    return `You’ve sent several AI requests quickly. Try again in ${retryAfter} seconds.`;
+  }
+
+  if (error?.code === "rate_limit_unavailable") {
+    return "AI requests are temporarily unavailable. Nothing was changed.";
+  }
+
+  return fallback;
+}
+
+async function readAiApiError(response: Response) {
+  try {
+    return (await response.json()) as AiApiErrorResponse;
+  } catch {
+    return null;
+  }
+}
 
 export default function Staff() {
   const staffWrapperRef = useRef<HTMLDivElement>(null);
@@ -263,6 +292,22 @@ export default function Staff() {
           pendingClarification,
         }),
       });
+
+      if (!response.ok) {
+        const error = await readAiApiError(response);
+        return {
+          ...DEFAULT_INTERPRETED_STYLE,
+          intent: "clarify",
+          confidence: 0,
+          actions: [],
+          warning: aiRequestFailureMessage(
+            response,
+            error,
+            "AI interpretation was unavailable. Nothing was changed.",
+          ),
+        };
+      }
+
       const result = (await response.json()) as HarmonyRouterResponse;
       harmonyDebug("interpretation_received", {
         httpStatus: response.status,
@@ -273,7 +318,7 @@ export default function Staff() {
       });
       return result;
     } catch (error) {
-      harmonyDebugError("interpretation_request_failed", error, { prompt });
+      harmonyDebugError("interpretation_request_failed", error);
       return null;
     }
   }
@@ -291,8 +336,13 @@ export default function Staff() {
       });
 
       if (!response.ok) {
+        const error = await readAiApiError(response);
         pushAssistantMessage(
-          "A plain-English explanation is unavailable right now. The progression is still ready to play.",
+          aiRequestFailureMessage(
+            response,
+            error,
+            "A plain-English explanation is unavailable right now. The progression is still ready to play.",
+          ),
         );
         return;
       }
@@ -542,7 +592,6 @@ export default function Staff() {
         "I couldn't find an unseen, structurally different option at the same style level. The current progression is unchanged.",
     });
     harmonyDebug("style_alternative_follow_up", {
-      reply: normalizedPrompt,
       direction: pending.direction,
       storedMetric: pending.metric,
       baseProgressionId: pending.progressionId,
@@ -588,7 +637,6 @@ export default function Staff() {
 
     if (candidateHash(finalProgression) === candidateHash(previousProgression)) {
       harmonyDebug("direct_edit_no_op", {
-        prompt: normalizedPrompt,
         actions,
         progressionId: candidateHash(previousProgression),
       });
@@ -608,7 +656,6 @@ export default function Staff() {
       normalizedPrompt,
     );
     harmonyDebug("direct_edit_applied", {
-      prompt: normalizedPrompt,
       actions,
       activeKey: generatedKey.label,
       before: previousProgression.map(({ chord }) => chord.absoluteSymbol),
@@ -656,7 +703,6 @@ export default function Staff() {
       facts,
     });
     harmonyDebug("focused_question_resolution", {
-      question: normalizedPrompt,
       progressionId,
       usedStoredFacts: Boolean(committedFacts),
       resolvedLocally: Boolean(focusedAnswer),
@@ -745,7 +791,7 @@ export default function Staff() {
 
     const normalizedPrompt = stylePrompt.trim();
     harmonyDebug("request_submitted", {
-      prompt: normalizedPrompt || "Generate best-fit progression",
+      hasPrompt: normalizedPrompt.length > 0,
       hasCommittedProgression: Boolean(lastProgressionRef.current?.length),
       candidatePreviewStatus: candidateSet?.status ?? null,
     });
@@ -790,7 +836,6 @@ export default function Staff() {
         previousProgression?.length ?? 4,
       );
       harmonyDebug("direct_edit_parse", {
-        prompt: normalizedPrompt,
         matched: Boolean(directEdits),
         fallbackReason: directEdits
           ? null
@@ -855,7 +900,6 @@ export default function Staff() {
 
       if (!data || data.warning) {
         harmonyDebug("interpretation_rejected", {
-          prompt: normalizedPrompt,
           responseReceived: Boolean(data),
           warning: data?.warning ?? null,
         });
@@ -872,7 +916,6 @@ export default function Staff() {
         prompt: normalizedPrompt,
       });
       harmonyDebug("request_normalized", {
-        prompt: normalizedPrompt,
         intent: request.intent,
         actions: "actions" in request ? request.actions : [],
       });
@@ -911,9 +954,7 @@ export default function Staff() {
           break;
       }
     } catch (error) {
-      harmonyDebugError("request_failed", error, {
-        prompt: normalizedPrompt,
-      });
+      harmonyDebugError("request_failed", error);
       setAiError("Something went wrong while generating. Please try again.");
     } finally {
       setIsGenerating(false);

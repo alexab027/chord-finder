@@ -21,6 +21,12 @@ import type {
 import { CHORD_SYMBOL } from "@/src/harmony/chordSymbol";
 import { validateChordEditTransaction } from "@/src/harmony/actionTransaction";
 import { asksForExplicitDescendingBass } from "@/src/harmony/requestLanguage";
+import {
+  checkGroqRateLimit,
+  groqProviderRateLimitResponse,
+  groqRateLimitResponse,
+  isGroqProviderRateLimit,
+} from "@/src/server/rateLimit";
 
 const MAX_PROMPT_LENGTH = 500;
 const MAX_KEY_LENGTH = 40;
@@ -925,13 +931,16 @@ export async function POST(request: Request): Promise<Response> {
   const model = process.env.GROQ_MODEL ?? "openai/gpt-oss-20b";
 
   try {
+    const rateLimit = await checkGroqRateLimit(request);
+    if (!rateLimit.allowed) return groqRateLimitResponse(rateLimit);
+
     // Fail fast into the graceful fallback below rather than hanging. The SDK
-    // defaults (maxRetries 2 + a long timeout) can turn one slow/rate-limited
-    // call into 20s+ of backoff on the user's critical path.
+    // Do not retry a paid request behind the per-IP quota: one admitted request
+    // must produce at most one provider call.
     const groq = new Groq({
       apiKey: process.env.GROQ_API_KEY,
       timeout: 10_000,
-      maxRetries: 1,
+      maxRetries: 0,
     });
 
     const userContent = JSON.stringify({
@@ -1107,11 +1116,12 @@ export async function POST(request: Request): Promise<Response> {
 
     return json({ ...interpretation, intent, confidence, actions });
   } catch (error) {
+    if (isGroqProviderRateLimit(error)) {
+      return groqProviderRateLimitResponse(error);
+    }
+
     // Log server-side only; never leak the key or a stack trace to the client.
-    console.error(
-      "interpret-style: Groq request failed:",
-      error instanceof Error ? error.message : "unknown error",
-    );
+    console.error("interpret-style: Groq request failed.");
     return json({
       ...DEFAULT_INTERPRETED_STYLE,
       intent: "clarify",

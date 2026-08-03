@@ -396,7 +396,6 @@ export function useHarmonyController({
     } catch (error) {
       harmonyDebugError("candidate_preparation_failed", error, {
         mode,
-        requestSummary,
         exactActionCount: exactActions?.length ?? 0,
       });
       setError(
@@ -427,7 +426,6 @@ export function useHarmonyController({
     if (candidates.length === 0) {
       harmonyDebug("candidate_preparation_empty", {
         mode,
-        requestSummary,
         seenProgressionCount: history.seenHashes.length,
         exactActionCount: exactActions?.length ?? 0,
       });
@@ -450,7 +448,6 @@ export function useHarmonyController({
 
     harmonyDebug("candidate_set_prepared", {
       mode,
-      requestSummary,
       key: key.label,
       styleDirection: styleDirection ?? null,
       styleIntensity:
