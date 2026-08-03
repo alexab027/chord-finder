@@ -2,6 +2,10 @@
 
 Chord Finder is an interactive harmony tool for turning a short melody into a playable four-measure chord progression. Write on the staff, generate harmony that fits, refine it in plain language, and hear the result.
 
+## Live Demo
+
+[Try Chord Finder](https://chord-finder-44oqgbx23-personal-9d98.vercel.app/)
+
 ## Features
 
 - Compose a four-measure melody in 4/4 using whole, half, quarter, and eighth notes or rests.
