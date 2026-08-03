@@ -38,9 +38,18 @@ Best-fit generation works locally without an AI service. To enable natural-langu
 GROQ_API_KEY=your_api_key
 # Optional shared model override
 GROQ_MODEL=openai/gpt-oss-20b
+
+# Required in production before Groq-backed requests are allowed
+UPSTASH_REDIS_REST_URL=your_upstash_redis_rest_url
+UPSTASH_REDIS_REST_TOKEN=your_upstash_redis_rest_token
+RATE_LIMIT_SALT=a_long_random_secret
 ```
 
 The request interpreter defaults to Groq-hosted `openai/gpt-oss-20b` and returns a strict typed schema. Setting `GROQ_MODEL` applies the same model override to interpretation and explanations. The model does not choose or generate chords: candidate generation, scoring, validation, exact edits, previews, and style-boundary checks remain inside the deterministic music engine.
+
+The Upstash settings enforce shared per-IP limits across both Groq routes. Tests
+and ordinary local development bypass rate limiting when those settings are
+absent; production blocks paid Groq calls until all three are configured.
 
 ## Usage
 
