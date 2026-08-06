@@ -120,6 +120,38 @@ describe("prepareVisibleCandidates", () => {
     );
   });
 
+  it("omits only the candidate whose voicing fails", () => {
+    const preferences = toGenerationPreferences(DEFAULT_INTERPRETED_STYLE);
+    let voicingCalls = 0;
+    let rejectedHash: string | undefined;
+
+    const candidates = prepareVisibleCandidates({
+      mode: "generate_new",
+      key: cMajor,
+      measures: emptyMeasures,
+      getRenderedPitchFn: noPitch,
+      style: preferences.style,
+      preferences,
+      currentProgression: null,
+      voiceProgressionFn: (progression) => {
+        voicingCalls += 1;
+        if (voicingCalls === 1) {
+          rejectedHash = candidateHash(progression);
+          throw new Error(
+            "Symbolic bass invariant failed for the rejected candidate.",
+          );
+        }
+        return visibleVoicing(progression);
+      },
+    });
+
+    expect(voicingCalls).toBe(3);
+    expect(candidates).toHaveLength(2);
+    expect(
+      candidates.every(({ symbolicHash }) => symbolicHash !== rejectedHash),
+    ).toBe(true);
+  });
+
   it("excludes the committed progression from an explicit generate-new request", () => {
     const preferences = toGenerationPreferences(DEFAULT_INTERPRETED_STYLE);
     const current = rankProgressions(

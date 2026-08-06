@@ -240,6 +240,9 @@ export function prepareVisibleCandidateResult({
           },
         ];
       } catch {
+        // Voicing is a per-candidate preparation boundary. A symbolic candidate
+        // that cannot honor its playability or bass invariant is omitted without
+        // preventing the remaining selected candidates from being previewed.
         return [];
       }
     },

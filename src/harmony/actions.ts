@@ -61,9 +61,9 @@ const ALLOWED_QUALITIES: HarmonyChordQuality[] = [
 ];
 
 // Deep-copies a chord's IDENTITY. Scalar fields are preserved as-is; the mutable
-// arrays are cloned so the copy never aliases the source's arrays. The bass/
-// inversion is encoded by the ORDER of pcs/noteNames (index 0 = bass), so order
-// is preserved exactly — that is what lets re-voicing keep the inversion intact.
+// arrays are cloned so the copy never aliases the source's arrays. `bassPc` is
+// authoritative for inversion identity during re-voicing; pitch-class and note-
+// name order is also preserved so each spelling remains paired with its tone.
 function cloneChordCandidate(source: ScoredChord["chord"]): ScoredChord["chord"] {
   return {
     ...source,

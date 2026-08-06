@@ -1,15 +1,37 @@
 import { describe, expect, it } from "vitest";
-import type { ScoredChord } from "./types";
+import type { KeyContext, ScoredChord } from "./types";
+import { buildKeyChords } from "./chords";
 import {
   choosePlayableVoicing,
   DEFAULT_ONE_HAND_VOICING_LIMITS,
+  getRequiredBassToneOrders,
   isVoicingPlayable,
   RELAXED_VOICING_LIMITS,
   voiceProgression,
   type VoicingLimits,
 } from "./voicing";
-import { parsePitchToMidi } from "./noteUtils";
+import { mod12, parsePitchToMidi } from "./noteUtils";
 import { DEFAULT_HARMONY_PROFILE } from "../harmony/preferences";
+
+const cMajor: KeyContext = {
+  signature: "C",
+  label: "C major",
+  tonicName: "c",
+  tonicPc: 0,
+  mode: "major",
+};
+
+const aMinor: KeyContext = {
+  signature: "C",
+  label: "A minor",
+  tonicName: "a",
+  tonicPc: 9,
+  mode: "minor",
+};
+
+function voicedPitchClasses(pitches: string[]) {
+  return pitches.map((pitch) => mod12(parsePitchToMidi(pitch) as number));
+}
 
 describe("voicing validity", () => {
   it("rejects a chord spanning too many semitones", () => {
@@ -61,6 +83,64 @@ describe("voicing validity", () => {
       ),
     ).toBe(true);
     expect(isVoicingPlayable(pitchNumbers as number[])).toBe(true);
+  });
+
+  it("fixes the requested bass while allowing upper voices to reorder", () => {
+    const pitches = choosePlayableVoicing([4, 0, 7], ["e", "c", "g"], {
+      requiredBassPc: 4,
+    });
+
+    expect(voicedPitchClasses(pitches)).toEqual([4, 7, 0]);
+    expect(
+      isVoicingPlayable(pitches.map((pitch) => parsePitchToMidi(pitch)!)),
+    ).toBe(true);
+  });
+
+  it("deduplicates equivalent upper-tone permutations with repeated pitch classes", () => {
+    const orders = getRequiredBassToneOrders(
+      [4, 0, 0, 7],
+      ["e", "c", "c", "g"],
+      4,
+    );
+    const pitchClassOrders = orders.map((order) =>
+      order.map(({ pc }) => mod12(pc)).join(","),
+    );
+
+    expect(pitchClassOrders).toHaveLength(3);
+    expect(new Set(pitchClassOrders).size).toBe(pitchClassOrders.length);
+    expect(pitchClassOrders.every((order) => order.startsWith("4,"))).toBe(
+      true,
+    );
+  });
+
+  it("fails explicitly when the requested bass is not a chord tone", () => {
+    expect(() =>
+      choosePlayableVoicing([0, 4, 7], ["c", "e", "g"], {
+        requiredBassPc: 2,
+      }),
+    ).toThrow(/required bass pitch class 2 is not present/i);
+  });
+
+  it("rejects an unvoiceable required inversion instead of using a playable root position", () => {
+    const rootOnlyRange: VoicingLimits = {
+      ...DEFAULT_ONE_HAND_VOICING_LIMITS,
+      minPitchNumber: 36,
+      maxPitchNumber: 47,
+    };
+
+    expect(
+      voicedPitchClasses(
+        choosePlayableVoicing([4, 0, 7], ["e", "c", "g"], {
+          limits: rootOnlyRange,
+        }),
+      )[0],
+    ).toBe(0);
+    expect(() =>
+      choosePlayableVoicing([4, 0, 7], ["e", "c", "g"], {
+        requiredBassPc: 4,
+        limits: rootOnlyRange,
+      }),
+    ).toThrow(/playability invariant failed/i);
   });
 
   it("keeps rendered fallback voicings playable", () => {
@@ -162,7 +242,7 @@ describe("voicing validity", () => {
       choosePlayableVoicing([0, 4, 7], ["c", "e", "g"], {
         limits: impossibleLimits,
       }),
-    ).toThrow(/playable fallback voicing/i);
+    ).toThrow(/playability invariant failed/i);
   });
 
   it("preserves explicit descending bass behavior when a lower bass is available", () => {
@@ -225,8 +305,8 @@ describe("voicing validity", () => {
           romanNumeral: "isus",
           absoluteSymbol: "Csus4",
           rootName: "C",
-          rootPc: 4,
-          bassPc: 4,
+          rootPc: 0,
+          bassPc: 0,
           pcs: [0, 0, 8],
           noteNames: ["c", "c", "g#"],
           pitches: [],
@@ -255,13 +335,66 @@ describe("voicing validity", () => {
         ...basePreferences,
         playabilityRequired: true,
       }),
-    ).toThrow(/playable fallback voicing/i);
+    ).toThrow(/playability invariant failed/i);
     const relaxed = voiceProgression(progression, [[]], () => "c/5", {
       ...basePreferences,
       playabilityRequired: false,
     })[0][0].pitches.map((pitch) => parsePitchToMidi(pitch) as number);
 
     expect(isVoicingPlayable(relaxed, RELAXED_VOICING_LIMITS)).toBe(true);
-    expect(relaxed.at(-1)! - relaxed[0]).toBeGreaterThan(12);
+    expect(relaxed[1] - relaxed[0]).toBeGreaterThan(
+      DEFAULT_ONE_HAND_VOICING_LIMITS.maxBassToNextVoiceGap,
+    );
   });
+
+  it.each(
+    [
+      ["root-position triad", "triad", 0],
+      ["first-inversion triad", "triad", 1],
+      ["second-inversion triad", "triad", 2],
+      ["third-inversion seventh chord", "maj7", 3],
+    ] as const,
+  )(
+    "preserves the symbolic bass for a %s",
+    (_label, quality, inversion) => {
+      const chord = buildKeyChords(cMajor).find(
+        (candidate) =>
+          candidate.degree === 1 &&
+          candidate.quality === quality &&
+          candidate.inversion === inversion,
+      );
+      if (!chord) {
+        throw new Error(`Missing test chord: ${quality}/${inversion}`);
+      }
+
+      const pitches = voiceProgression(
+        [{ chord, score: 0, reasons: [] }],
+        [[]],
+        () => "c/5",
+      )[0][0].pitches;
+
+      expect(mod12(parsePitchToMidi(pitches[0])!)).toBe(chord.bassPc);
+    },
+  );
+
+  for (const key of [cMajor, aMinor]) {
+    const candidates = buildKeyChords(key);
+
+    it(`voices all ${candidates.length} generated candidates for ${key.label} without changing candidate count`, () => {
+      const voiced = candidates.map((chord) => ({
+        chord,
+        pitches: choosePlayableVoicing(chord.pcs, chord.noteNames, {
+          requiredBassPc: chord.bassPc,
+        }),
+      }));
+
+      expect(voiced).toHaveLength(candidates.length);
+      expect(
+        voiced.every(
+          ({ chord, pitches }) =>
+            mod12(parsePitchToMidi(pitches[0])!) === chord.bassPc,
+        ),
+      ).toBe(true);
+    });
+  }
 });

@@ -71,6 +71,10 @@ function getPitchClasses(pitchNumbers: number[]) {
   return pitchNumbers.map((pitchNumber) => mod12(pitchNumber));
 }
 
+function pitchClassesMatch(left: number, right: number) {
+  return mod12(left) === mod12(right);
+}
+
 export function isVoicingPlayable(
   pitchNumbers: number[],
   limits: VoicingLimits = DEFAULT_ONE_HAND_VOICING_LIMITS,
@@ -202,6 +206,65 @@ function getCompleteToneInversions(pcs: number[], noteNames: string[]) {
   ]);
 }
 
+function getUniquePermutations<T>(
+  items: T[],
+  getIdentity: (item: T) => string | number,
+): T[][] {
+  if (items.length <= 1) return [items];
+
+  const usedIdentities = new Set<string | number>();
+  return items.flatMap((item, index) => {
+    const identity = getIdentity(item);
+    if (usedIdentities.has(identity)) return [];
+    usedIdentities.add(identity);
+
+    return getUniquePermutations(
+      [...items.slice(0, index), ...items.slice(index + 1)],
+      getIdentity,
+    ).map((remaining) => [item, ...remaining]);
+  });
+}
+
+export function getRequiredBassToneOrders(
+  pcs: number[],
+  noteNames: string[],
+  requiredBassPc: number,
+) {
+  const tones = pcs.map((pc, index) => ({ pc, noteName: noteNames[index] }));
+  const matchingBassIndexes = tones.flatMap((tone, index) =>
+    pitchClassesMatch(tone.pc, requiredBassPc) ? [index] : [],
+  );
+
+  if (matchingBassIndexes.length === 0) {
+    throw new Error(
+      `Symbolic bass invariant failed: required bass pitch class ${mod12(requiredBassPc)} is not present in chord pitch classes [${pcs
+        .map(mod12)
+        .join(", ")}].`,
+    );
+  }
+
+  const orders = matchingBassIndexes.flatMap((bassIndex) => {
+    const bassTone = tones[bassIndex];
+    const upperTones = [
+      ...tones.slice(0, bassIndex),
+      ...tones.slice(bassIndex + 1),
+    ];
+
+    return getUniquePermutations(upperTones, ({ pc }) => mod12(pc)).map(
+      (upperOrder) => [bassTone, ...upperOrder],
+    );
+  });
+
+  return [
+    ...new Map(
+      orders.map((order) => [
+        order.map(({ pc }) => mod12(pc)).join(","),
+        order,
+      ]),
+    ).values(),
+  ];
+}
+
 function buildCandidateVoicings(
   toneOrders: VoicingTone[][],
   previousBassPitchNumber: number | undefined,
@@ -248,6 +311,7 @@ function buildCandidateVoicings(
 function buildFallbackVoicing(
   toneOrders: VoicingTone[][],
   limits: VoicingLimits,
+  requiredBassPc?: number,
 ): CandidateVoicing {
   for (const tones of toneOrders) {
     const pcs = tones.map((tone) => tone.pc);
@@ -274,9 +338,13 @@ function buildFallbackVoicing(
   }
 
   throw new Error(
-    `Unable to construct a playable fallback voicing for pitch classes [${toneOrders[0]
+    `Playability invariant failed: unable to construct a playable voicing for pitch classes [${toneOrders[0]
       .map((tone) => tone.pc)
-      .join(", ")}] within the configured limits.`,
+      .join(", ")}] within the configured limits${
+      requiredBassPc === undefined
+        ? "."
+        : ` while preserving required bass pitch class ${mod12(requiredBassPc)}.`
+    }`,
   );
 }
 
@@ -284,6 +352,7 @@ export function choosePlayableVoicing(
   pcs: number[],
   noteNames: string[],
   options: {
+    requiredBassPc?: number;
     lowestMelodyPitchNumber?: number;
     previousPitchNumbers?: number[];
     previousBassPitchNumber?: number;
@@ -301,7 +370,10 @@ export function choosePlayableVoicing(
       : RELAXED_VOICING_LIMITS);
   const descendingBassWeight = options.descendingBassWeight ?? 0;
   const voiceLeadingPriority = options.voiceLeadingPriority ?? 0.75;
-  const toneOrders = getCompleteToneInversions(pcs, noteNames);
+  const toneOrders =
+    options.requiredBassPc === undefined
+      ? getCompleteToneInversions(pcs, noteNames)
+      : getRequiredBassToneOrders(pcs, noteNames, options.requiredBassPc);
   const candidates = buildCandidateVoicings(
     toneOrders,
     options.previousBassPitchNumber,
@@ -321,7 +393,7 @@ export function choosePlayableVoicing(
         ),
       }))
       .sort((a, b) => b.score - a.score)[0] ??
-    buildFallbackVoicing(toneOrders, limits);
+    buildFallbackVoicing(toneOrders, limits, options.requiredBassPc);
 
   return chosen.pitchNumbers.map((pitchNumber, index) =>
     midiToSpelledPitch(pitchNumber, chosen.noteNames[index]),
@@ -353,6 +425,7 @@ export function voiceProgression(
       getRenderedPitchFn,
     );
     const pitches = choosePlayableVoicing(chord.pcs, chord.noteNames, {
+      requiredBassPc: chord.bassPc,
       lowestMelodyPitchNumber: lowestMelodyMidi,
       previousPitchNumbers,
       previousBassPitchNumber:
@@ -362,7 +435,19 @@ export function voiceProgression(
       playabilityRequired: preferences?.playabilityRequired,
     });
 
-    previousBassMidi = parsePitchToMidi(pitches[0]) ?? previousBassMidi;
+    const voicedBassPitchNumber = parsePitchToMidi(pitches[0]);
+    if (voicedBassPitchNumber === undefined) {
+      throw new Error(
+        `Voicing output invariant failed for ${chord.absoluteSymbol}: first voiced pitch "${pitches[0]}" is not parseable.`,
+      );
+    }
+    if (!pitchClassesMatch(voicedBassPitchNumber, chord.bassPc)) {
+      throw new Error(
+        `Symbolic bass invariant failed for ${chord.absoluteSymbol}: first voiced pitch "${pitches[0]}" has pitch class ${mod12(voicedBassPitchNumber)}, expected chord.bassPc ${mod12(chord.bassPc)}.`,
+      );
+    }
+
+    previousBassMidi = voicedBassPitchNumber;
     previousPitchNumbers = pitches
       .map((pitch) => parsePitchToMidi(pitch))
       .filter(
