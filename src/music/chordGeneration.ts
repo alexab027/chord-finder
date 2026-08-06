@@ -177,7 +177,7 @@ function getProgressionTotalScore(
   );
 }
 
-export function scoreProgression(
+export function scoreFullProgression(
   progression: readonly ChordCandidate[],
   key: KeyContext,
   measures: PlacedNote[][],

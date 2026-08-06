@@ -6,6 +6,10 @@ import { playMeasuresAudio } from "../audio/playback";
 import { getGenerationKey } from "../music/keyDetection";
 import { DURATION_TO_SLOTS } from "../music/noteUtils";
 import {
+  canAppendDuration,
+  getNextAvailableSlot,
+} from "./chord-finder/melodyCapacity";
+import {
   getStaffGeometry,
   getMeasureInfoFromClick,
   EDITOR_PANEL_WIDTH,
@@ -207,17 +211,6 @@ export default function Staff() {
   const getRenderedPitch = (note: PlacedNote) =>
     renderPitch(note, keySignature);
 
-  function getNextAvailableSlot(measureNotes: PlacedNote[]) {
-    let nextSlot = 0;
-
-    for (const note of measureNotes) {
-      const noteEnd = note.slot + note.durationSlots;
-      nextSlot = Math.max(nextSlot, noteEnd);
-    }
-
-    return nextSlot;
-  }
-
   function handleStaffClick(event: React.MouseEvent<HTMLDivElement>) {
     if (!staffWrapperRef.current) return;
 
@@ -252,7 +245,7 @@ export default function Staff() {
 
       const nextSlot = getNextAvailableSlot(measureNotes);
 
-      if (nextSlot + durationSlots > 8) {
+      if (!canAppendDuration(measureNotes, durationSlots)) {
         return prevMeasures;
       }
 

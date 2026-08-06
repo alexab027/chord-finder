@@ -1,5 +1,5 @@
 import { buildKeyChords } from "../../music/chords";
-import { scoreProgression } from "../../music/chordGeneration";
+import { scoreFullProgression } from "../../music/chordGeneration";
 import type {
   ChordCandidate,
   ChordQuality,
@@ -99,7 +99,7 @@ function scoreTransform(
   chords: readonly ChordCandidate[],
   context: CandidateGenerationContext,
 ): CandidatePoolEntry {
-  const scored = scoreProgression(
+  const scored = scoreFullProgression(
     chords,
     context.key,
     context.measures,

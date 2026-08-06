@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_HARMONY_PROFILE } from "../harmony/preferences";
 import { buildNamedChord } from "./chords";
 import type { ChordCandidate, KeyContext, PlacedNote } from "./types";
-import { scoreChord, scoreMelodyFit } from "./chordScoring";
+import {
+  scoreChord,
+  scoreChordMovement,
+  scoreMelodyFit,
+} from "./chordScoring";
 
 const cMajor: KeyContext = {
   signature: "C",
@@ -164,5 +168,24 @@ describe("melody-fit scoring", () => {
     expect(scoreChord(am, context).score).toBeGreaterThan(
       scoreChord(am7, context).score,
     );
+  });
+});
+
+describe("chord movement scoring", () => {
+  it("rewards V-I more strongly than unrelated movement", () => {
+    const dominant = { ...triad("V", [7, 11, 2]), degree: 5 };
+    const tonic = { ...triad("I", [0, 4, 7]), degree: 1 };
+    const mediant = { ...triad("iii", [4, 7, 11]), degree: 3 };
+
+    expect(scoreChordMovement(dominant, tonic).points).toBeGreaterThan(
+      scoreChordMovement(dominant, mediant).points,
+    );
+  });
+
+  it("returns no movement score for the opening chord", () => {
+    expect(scoreChordMovement(undefined, triad("I", [0, 4, 7]))).toEqual({
+      points: 0,
+      reasons: [],
+    });
   });
 });

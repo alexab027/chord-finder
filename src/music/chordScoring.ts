@@ -479,7 +479,7 @@ export function scorePreferences(
   return { points, reasons };
 }
 
-export function scoreProgression(
+export function scoreChordMovement(
   previousChord: ChordCandidate | undefined,
   candidate: ChordCandidate,
 ): ScoreResult {
@@ -537,7 +537,7 @@ export function scoreChord(
     ),
     scoreKeyFit(candidate, context.key),
     scoreStyle(candidate, context.style, context),
-    scoreProgression(context.previousChord, candidate),
+    scoreChordMovement(context.previousChord, candidate),
   ];
 
   if (context.preferences) {
