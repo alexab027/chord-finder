@@ -3,9 +3,12 @@ import { DEFAULT_HARMONY_PROFILE } from "../harmony/preferences";
 import { buildNamedChord } from "./chords";
 import type { ChordCandidate, KeyContext, PlacedNote } from "./types";
 import {
+  getIntervalDissonancePenalty,
+  isStepwiseResolution,
   scoreChord,
   scoreChordMovement,
   scoreMelodyFit,
+  type MelodyEvent,
 } from "./chordScoring";
 
 const cMajor: KeyContext = {
@@ -41,11 +44,7 @@ function triad(name: string, pcs: number[]): ChordCandidate {
   };
 }
 
-function note(
-  pitch: string,
-  slot: number,
-  durationSlots: number,
-): PlacedNote {
+function note(pitch: string, slot: number, durationSlots: number): PlacedNote {
   return {
     pitch,
     slot,
@@ -58,23 +57,68 @@ function note(
 
 const renderPitch = (placedNote: PlacedNote) => placedNote.pitch;
 
+describe("directed interval dissonance", () => {
+  it.each([
+    [0, 0],
+    [1, 5],
+    [2, 1.2],
+    [3, 0],
+    [4, 0],
+    [5, 0.8],
+    [6, 3.2],
+    [7, 0],
+    [8, 0.8],
+    [9, 0],
+    [10, 1.4],
+    [11, 5],
+  ])(
+    "uses the penalty for directed semitone class %i",
+    (melodyPc, expectedPenalty) => {
+      expect(getIntervalDissonancePenalty(melodyPc, 0)).toBe(expectedPenalty);
+    },
+  );
+
+  it("does not fold opposite interval directions into one class", () => {
+    expect(getIntervalDissonancePenalty(2, 0)).toBe(1.2);
+    expect(getIntervalDissonancePenalty(10, 0)).toBe(1.4);
+    expect(getIntervalDissonancePenalty(5, 0)).toBe(0.8);
+    expect(getIntervalDissonancePenalty(7, 0)).toBe(0);
+  });
+
+  it("normalizes pitch classes before selecting a directed penalty", () => {
+    expect(getIntervalDissonancePenalty(14, 12)).toBe(1.2);
+    expect(getIntervalDissonancePenalty(-2, 0)).toBe(1.4);
+  });
+
+  it("keeps stepwise resolution based on shortest pitch-class distance", () => {
+    const event = (pc: number, index: number): MelodyEvent => ({
+      note: note("c/5", index, 1),
+      pc,
+      label: "test",
+      importance: 1,
+      index,
+    });
+
+    expect(
+      isStepwiseResolution(event(11, 0), [event(11, 0), event(1, 1)]),
+    ).toBe(true);
+    expect(isStepwiseResolution(event(1, 0), [event(1, 0), event(11, 1)])).toBe(
+      true,
+    );
+  });
+});
+
 describe("melody-fit scoring", () => {
   it("rewards a chord containing an important melody note over an exposed minor-second clash", () => {
     const melody = [note("eb/5", 0, 4)];
     const supportsEb = triad("Eb", [3, 7, 10]);
     const clashesWithEb = triad("D-F shell", [2, 5, 9]);
 
-    const supported = scoreMelodyFit(
-      supportsEb,
-      melody,
-      renderPitch,
-      cMajor,
-      {
-        melodyFitPriority: 1,
-        consonancePriority: 0.9,
-        dissonanceTolerance: 0.1,
-      },
-    );
+    const supported = scoreMelodyFit(supportsEb, melody, renderPitch, cMajor, {
+      melodyFitPriority: 1,
+      consonancePriority: 0.9,
+      dissonanceTolerance: 0.1,
+    });
     const clashing = scoreMelodyFit(
       clashesWithEb,
       melody,

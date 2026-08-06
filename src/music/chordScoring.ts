@@ -119,17 +119,19 @@ function getMeasureMelodyEvents(
   });
 }
 
-function getIntervalDistance(a: number, b: number) {
+function getDirectedInterval(melodyPc: number, chordPc: number) {
+  return mod12(melodyPc - chordPc);
+}
+function getPitchClassDistance(a: number, b: number) {
   const interval = mod12(a - b);
   return Math.min(interval, 12 - interval);
 }
-
 export function getIntervalDissonancePenalty(
   melodyPc: number,
   chordPc: number,
 ) {
   return (
-    INTERVAL_DISSONANCE_PENALTIES[getIntervalDistance(melodyPc, chordPc)] ?? 0
+    INTERVAL_DISSONANCE_PENALTIES[getDirectedInterval(melodyPc, chordPc)] ?? 0
   );
 }
 
@@ -141,7 +143,7 @@ export function isStepwiseResolution(
     (candidate) => candidate.index > event.index,
   );
   if (!nextEvent) return false;
-  const distance = getIntervalDistance(event.pc, nextEvent.pc);
+  const distance = getPitchClassDistance(event.pc, nextEvent.pc);
   return distance === 1 || distance === 2;
 }
 
@@ -167,8 +169,7 @@ export function scoreMelodyNoteAgainstChord(
   const reasons: string[] = [];
   let points = 0;
   const supportPcs =
-    options.simpleAccompaniment &&
-    isSeventhOrExtendedQuality(candidate.quality)
+    options.simpleAccompaniment && isSeventhOrExtendedQuality(candidate.quality)
       ? candidate.pcs.slice(0, 3)
       : candidate.pcs;
 
