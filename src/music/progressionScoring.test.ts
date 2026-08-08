@@ -17,6 +17,17 @@ const cMajor: KeyContext = {
 const emptyMeasures: PlacedNote[][] = [[], [], [], []];
 const noPitch = () => "";
 
+function note(pitch: string): PlacedNote {
+  return {
+    pitch,
+    slot: 0,
+    duration: "h",
+    durationSlots: 4,
+    kind: "note",
+    accidental: null,
+  };
+}
+
 describe("scoreFullProgression", () => {
   it("reproduces the existing ranked winner score without changing identity", () => {
     const winner = rankProgressions(
@@ -33,7 +44,7 @@ describe("scoreFullProgression", () => {
       "simple",
     );
 
-    expect(rescored.totalScore).toBeCloseTo(81.8);
+    expect(rescored.totalScore).toBeCloseTo(68);
     expect(rescored.totalScore).toBe(winner.totalScore);
     expect(
       rescored.progression.map(({ chord }) => chord.absoluteSymbol),
@@ -66,5 +77,29 @@ describe("scoreFullProgression", () => {
         "simple",
       ).totalScore,
     );
+  });
+
+  it("does not apply the melody weight again to final per-chord scores", () => {
+    const chord = (name: string) => {
+      const candidate = buildNamedChord(cMajor, name);
+      if (!candidate) throw new Error(`Could not build ${name}`);
+      return candidate;
+    };
+    const progression = [chord("C"), chord("F"), chord("G"), chord("C")];
+    const scored = scoreFullProgression(
+      progression,
+      cMajor,
+      [[note("c/5")], [], [], []],
+      (placedNote) => placedNote.pitch,
+      "simple",
+    );
+    const perChordTotal = scored.progression.reduce(
+      (total, scoredChord) => total + scoredChord.score,
+      0,
+    );
+
+    // C-F, F-G, G-C transitions = 1 + 4 + 6; final tonic = 8;
+    // opening tonic = 2. The per-chord subtotal is already fully weighted.
+    expect(scored.totalScore).toBeCloseTo(perChordTotal + 21);
   });
 });
