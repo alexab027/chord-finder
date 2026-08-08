@@ -123,7 +123,7 @@ describe("rankProgressions", () => {
     expect(
       cMajorPool[0].progression.map(({ chord }) => chord.absoluteSymbol),
     ).toEqual(["Am", "F", "G", "C"]);
-    expect(cMajorPool[0].totalScore).toBeCloseTo(81.8);
+    expect(cMajorPool[0].totalScore).toBeCloseTo(68);
     expect(
       aMinorPool[0].progression.map(({ chord }) => chord.absoluteSymbol),
     ).toEqual(["Am7", "Dm7", "E7", "Am7"]);

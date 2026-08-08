@@ -1,13 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_HARMONY_PROFILE } from "../harmony/preferences";
 import { buildNamedChord } from "./chords";
-import type { ChordCandidate, KeyContext, PlacedNote } from "./types";
+import type {
+  ChordCandidate,
+  ChordScoreContext,
+  KeyContext,
+  PlacedNote,
+} from "./types";
 import {
   getIntervalDissonancePenalty,
   isStepwiseResolution,
+  MELODY_WEIGHT,
   scoreChord,
   scoreChordMovement,
+  scoreKeyFit,
   scoreMelodyFit,
+  scorePreferences,
+  scoreRevisionSimilarity,
+  scoreStyle,
   type MelodyEvent,
 } from "./chordScoring";
 
@@ -212,6 +222,117 @@ describe("melody-fit scoring", () => {
     expect(scoreChord(am, context).score).toBeGreaterThan(
       scoreChord(am7, context).score,
     );
+  });
+});
+
+describe("per-chord score aggregation", () => {
+  it("applies MELODY_WEIGHT to melody fit without scaling other components", () => {
+    const candidate = triad("I", [0, 4, 7]);
+    const melody = [note("c/5", 0, 4)];
+    const context: ChordScoreContext = {
+      key: cMajor,
+      style: "simple",
+      measureNotes: melody,
+      measureIndex: 0,
+      measureCount: 4,
+      getRenderedPitchFn: renderPitch,
+    };
+    const melodyResult = scoreMelodyFit(
+      candidate,
+      melody,
+      renderPitch,
+      cMajor,
+      { simpleAccompaniment: true },
+    );
+    const otherScore =
+      scoreKeyFit(candidate, cMajor).points +
+      scoreStyle(candidate, "simple", context).points +
+      scoreChordMovement(undefined, candidate).points;
+
+    expect(scoreChord(candidate, context).score).toBeCloseTo(
+      melodyResult.points * MELODY_WEIGHT + otherScore,
+    );
+    expect(scoreChord(candidate, context).score - otherScore).toBeCloseTo(
+      melodyResult.points * MELODY_WEIGHT,
+    );
+    expect(MELODY_WEIGHT).toBeGreaterThan(1);
+    expect(scoreChord(candidate, context).score - otherScore).toBeGreaterThan(
+      melodyResult.points,
+    );
+  });
+
+  it("keeps key, style, and movement points numerically unchanged", () => {
+    const dominant = { ...triad("V", [7, 11, 2]), degree: 5 };
+    const tonic = triad("I", [0, 4, 7]);
+    const context: ChordScoreContext = {
+      key: cMajor,
+      style: "simple",
+      measureNotes: [],
+      measureIndex: 1,
+      measureCount: 4,
+      getRenderedPitchFn: renderPitch,
+      previousChord: dominant,
+    };
+
+    expect(scoreKeyFit(tonic, cMajor).points).toBe(4);
+    expect(scoreStyle(tonic, "simple", context).points).toBe(5);
+    expect(scoreChordMovement(dominant, tonic).points).toBe(5);
+    expect(scoreChord(tonic, context).score).toBe(14);
+  });
+
+  it("preserves reasons from melody and every other score component", () => {
+    const dominant = { ...triad("V", [7, 11, 2]), degree: 5 };
+    const candidate = triad("I", [0, 4, 7]);
+    const preferences = {
+      ...DEFAULT_HARMONY_PROFILE,
+      complexity: 0.2,
+    };
+    const context: ChordScoreContext = {
+      key: cMajor,
+      style: "simple",
+      measureNotes: [note("c/5", 0, 4)],
+      measureIndex: 1,
+      measureCount: 4,
+      getRenderedPitchFn: renderPitch,
+      previousChord: dominant,
+      preferences,
+      revision: {
+        preserveOverallProgression: true,
+        changeAmount: 0.2,
+      },
+      revisionTarget: {
+        degree: candidate.degree,
+        rootPc: candidate.rootPc,
+        quality: candidate.quality,
+        bassPc: candidate.bassPc,
+      },
+      revisionLocked: true,
+    };
+    const melodyResult = scoreMelodyFit(
+      candidate,
+      context.measureNotes,
+      renderPitch,
+      cMajor,
+      {
+        melodyFitPriority: preferences.melodyFitPriority,
+        consonancePriority: preferences.consonancePriority,
+        dissonanceTolerance: preferences.dissonanceTolerance,
+        isFinalMeasure: false,
+        simpleAccompaniment: true,
+      },
+    );
+    const otherParts = [
+      scoreKeyFit(candidate, cMajor),
+      scoreStyle(candidate, "simple", context),
+      scoreChordMovement(dominant, candidate),
+      scorePreferences(candidate, preferences),
+      scoreRevisionSimilarity(candidate, context),
+    ];
+
+    expect(scoreChord(candidate, context).reasons).toEqual([
+      ...melodyResult.reasons,
+      ...otherParts.flatMap((part) => part.reasons),
+    ]);
   });
 });
 

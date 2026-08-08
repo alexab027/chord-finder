@@ -23,6 +23,7 @@ import {
 } from "./noteUtils";
 
 const MEASURE_SLOT_COUNT = 8;
+export const MELODY_WEIGHT = 1.3;
 
 const INTERVAL_DISSONANCE_PENALTIES: Record<number, number> = {
   0: 0,
@@ -528,30 +529,39 @@ export function scoreChord(
         simpleAccompaniment: context.style === "simple",
       };
 
-  const scoreParts: ScoreResult[] = [
-    scoreMelodyFit(
-      candidate,
-      context.measureNotes,
-      context.getRenderedPitchFn,
-      context.key,
-      melodyFitOptions,
-    ),
+  const melodyResult = scoreMelodyFit(
+    candidate,
+    context.measureNotes,
+    context.getRenderedPitchFn,
+    context.key,
+    melodyFitOptions,
+  );
+  const otherScoreParts: ScoreResult[] = [
     scoreKeyFit(candidate, context.key),
     scoreStyle(candidate, context.style, context),
     scoreChordMovement(context.previousChord, candidate),
   ];
 
   if (context.preferences) {
-    scoreParts.push(scorePreferences(candidate, context.preferences));
+    otherScoreParts.push(scorePreferences(candidate, context.preferences));
   }
 
   if (context.revision) {
-    scoreParts.push(scoreRevisionSimilarity(candidate, context));
+    otherScoreParts.push(scoreRevisionSimilarity(candidate, context));
   }
+
+  const melodyScore = melodyResult.points * MELODY_WEIGHT;
+  const otherScore = otherScoreParts.reduce(
+    (total, part) => total + part.points,
+    0,
+  );
 
   return {
     chord: candidate,
-    score: scoreParts.reduce((total, part) => total + part.points, 0),
-    reasons: scoreParts.flatMap((part) => part.reasons),
+    score: melodyScore + otherScore,
+    reasons: [
+      ...melodyResult.reasons,
+      ...otherScoreParts.flatMap((part) => part.reasons),
+    ],
   };
 }

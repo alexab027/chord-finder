@@ -71,7 +71,6 @@ function getTransitionScore(mode: KeyMode, from: number, to: number) {
 }
 
 // ******WEIGHTS for scoring chord patterns*********//
-const MELODY_WEIGHT = 1.3;
 const TRANSITION_WEIGHT = 1.0;
 const CADENCE_WEIGHT = 1.0;
 const OPENING_TONIC_BONUS = 2;
@@ -170,7 +169,7 @@ function getProgressionTotalScore(
   const cadenceMultiplier = preferences ? 0.5 + preferences.cadenceStrength : 1;
 
   return (
-    candidateScore * MELODY_WEIGHT +
+    candidateScore +
     transitionScore * TRANSITION_WEIGHT +
     cadenceScore * CADENCE_WEIGHT * cadenceMultiplier +
     openingScore
